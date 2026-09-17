@@ -70,7 +70,7 @@ function ensureSeedData() {
     ['Fernanda Lima', 'moderadora@urbano.com', 'mod123', 'moderador'],
     ['Ana Souza', 'ana@mail.com', '123456', 'cidadao'],
     ['Pedro Rocha', 'pedro@mail.com', '123456', 'cidadao'],
-  ].map(([name, email, password, role]) => ({ id: uid('u'), name, email, password, role, photo: null, createdAt: nowISO() }));
+  ].map(([name, email, password, role]) => ({ id: uid('u'), name, email, password, role, photo: null, photoUrl: null, createdAt: nowISO() }));
   saveUsers(users);
   const ana = users.find(user => user.email === 'ana@mail.com');
   const pedro = users.find(user => user.email === 'pedro@mail.com');
@@ -101,9 +101,21 @@ async function registerCitizen({ name, email, password }) {
   if (!name || !email || !password) return { ok: false, msg: 'Preencha todos os campos.' };
   if (password.length < 4) return { ok: false, msg: 'Senha deve ter ao menos 4 caracteres.' };
   if (findUserByEmail(email)) return { ok: false, msg: 'Este e-mail já está cadastrado.' };
-  const user = { id: uid('u'), name, email, password, role: 'cidadao', photo: null, createdAt: nowISO() };
+  const user = { id: uid('u'), name, email, password, role: 'cidadao', photo: null, photoUrl: null, createdAt: nowISO() };
   saveUsers([...getUsers(), user]);
   setSession(user.id);
+  return { ok: true, user };
+}
+function createUserByAdmin({ name, email, password, role }) {
+  name = (name || '').trim();
+  email = (email || '').trim().toLowerCase();
+  role = (role || 'admin').toLowerCase();
+  if (!name || !email || !password) return { ok: false, msg: 'Preencha todos os campos.' };
+  if (password.length < 4) return { ok: false, msg: 'Senha deve ter ao menos 4 caracteres.' };
+  if (!['admin', 'moderador', 'superadmin'].includes(role)) return { ok: false, msg: 'Função inválida.' };
+  if (findUserByEmail(email)) return { ok: false, msg: 'Este e-mail já está cadastrado.' };
+  const user = { id: uid('u'), name, email, password, role, photo: null, photoUrl: null, createdAt: nowISO() };
+  saveUsers([...getUsers(), user]);
   return { ok: true, user };
 }
 async function login({ email, password }) {
@@ -114,7 +126,7 @@ async function login({ email, password }) {
 }
 function logout() { clearSession(); }
 function resetUserPassword(userId, newPassword) { const users = getUsers(); const user = users.find(item => item.id === userId); if (!user) return { ok: false, msg: 'Usuário não encontrado.' }; if (!newPassword || newPassword.length < 4) return { ok: false, msg: 'Senha deve ter ao menos 4 caracteres.' }; user.password = newPassword; saveUsers(users); return { ok: true }; }
-function updateUserPhoto(userId, photoDataUrl) { const users = getUsers(); const user = users.find(item => item.id === userId); if (!user) return { ok: false }; user.photo = photoDataUrl; saveUsers(users); return { ok: true, user }; }
+function updateUserPhoto(userId, photoDataUrl) { const users = getUsers(); const user = users.find(item => item.id === userId); if (!user) return { ok: false }; user.photo = photoDataUrl; user.photoUrl = photoDataUrl; saveUsers(users); return { ok: true, user }; }
 
 function createDenuncia({ title, description, category, location, latitude, longitude, media }) {
   const user = currentUser();

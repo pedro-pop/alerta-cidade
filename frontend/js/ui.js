@@ -100,7 +100,8 @@ function avatarHTML(userId, fallbackName, sizeClass) {
   const u = findUserById(userId);
   const name = u ? u.name : (fallbackName || '?');
   const cls = 'avatar' + (sizeClass ? ' ' + sizeClass : '');
-  if (u && u.photo) return `<img src="${u.photo}" class="${cls} avatar-img" alt="${escapeHTML(name)}">`;
+  const photoUrl = (u && (u.photo || u.photoUrl)) || null;
+  if (photoUrl) return `<img src="${photoUrl}" class="${cls} avatar-img" alt="${escapeHTML(name)}">`;
   return `<span class="${cls}">${initials(name)}</span>`;
 }
 
@@ -339,14 +340,16 @@ function filteredDenuncias(user) {
   if (f.status !== 'all') list = list.filter(d => d.status === f.status);
   if (f.search.trim()) {
     const q = f.search.trim().toLowerCase();
-    list = list.filter(d =>
-      d.title.toLowerCase().includes(q) ||
-      d.description.toLowerCase().includes(q) ||
-      d.location.toLowerCase().includes(q));
+    list = list.filter(d => {
+      const title = String(d.title || '').toLowerCase();
+      const description = String(d.description || '').toLowerCase();
+      const location = String(d.location || '').toLowerCase();
+      return title.includes(q) || description.includes(q) || location.includes(q);
+    });
   }
   if (f.sort === 'recent') list = list.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   if (f.sort === 'old') list = list.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  if (f.sort === 'likes') list = list.slice().sort((a, b) => b.likes.length - a.likes.length);
+  if (f.sort === 'likes') list = list.slice().sort((a, b) => (b.likes || []).length - (a.likes || []).length);
   return list;
 }
 
@@ -1019,6 +1022,12 @@ function handleProfilePhotoFileSelect(input) {
   const file = input.files && input.files[0];
   input.value = '';
   if (!file) return;
+
+  if (!file.type || !file.type.startsWith('image/')) {
+    showToast('Selecione uma imagem válida para a foto de perfil.', 'error');
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = () => {
     const user = currentUser();
@@ -1038,19 +1047,27 @@ document.addEventListener('click', (e) => {
   if (outsideNotifClick) state.notifOpen = false;
 
   const closeModalTarget = e.target.closest('[data-action="close-modal"]');
-  if (closeModalTarget && !e.target.closest('[data-stop]')) {
-    closeModal();
-    if (outsideNotifClick) render();
-    return;
+  if (closeModalTarget) {
+    const clickedInsideModal = !!e.target.closest('[data-stop]');
+    const clickedCloseButton = !!closeModalTarget.closest('.icon-btn');
+    if (!clickedInsideModal || clickedCloseButton) {
+      closeModal();
+      if (outsideNotifClick) render();
+      return;
+    }
   }
 
   const cameraCancelTarget = e.target.closest('[data-action="camera-cancel"]');
-  if (cameraCancelTarget && !e.target.closest('[data-stop]')) {
-    Camera.stop();
-    state.cameraOnDone = null;
-    closeModal();
-    if (outsideNotifClick) render();
-    return;
+  if (cameraCancelTarget) {
+    const clickedInsideModal = !!e.target.closest('[data-stop]');
+    const clickedCloseButton = !!cameraCancelTarget.closest('.icon-btn');
+    if (!clickedInsideModal || clickedCloseButton) {
+      Camera.stop();
+      state.cameraOnDone = null;
+      closeModal();
+      if (outsideNotifClick) render();
+      return;
+    }
   }
 
   const el = e.target.closest('[data-action]');
@@ -1072,7 +1089,7 @@ document.addEventListener('click', (e) => {
       break;
 
     case 'use-my-location':
-      LocationMap.useCurrentLocation();
+      useCurrentLocation();
       break;
 
     case 'logout':
