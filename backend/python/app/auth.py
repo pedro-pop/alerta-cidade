@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.supabase_client import supabase
+from app.dependencies import get_current_user
 
-router = APIRouter(prefix="/auth", tags=["Autenticação"])
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["Autenticação"]
+)
 
 
 class RegisterRequest(BaseModel):
@@ -70,13 +75,40 @@ def login(data: LoginRequest):
                 detail="E-mail ou senha inválidos."
             )
 
+        access_token = response.session.access_token
+
+        # Cliente autenticado com o JWT do usuário.
+        from app.supabase_client import get_authenticated_client
+
+        client = get_authenticated_client(access_token)
+
+        profile_response = (
+            client
+            .table("profiles")
+            .select("id, name, role, photo_url")
+            .eq("id", response.user.id)
+            .single()
+            .execute()
+        )
+
+        profile = profile_response.data
+
+        if not profile:
+            raise HTTPException(
+                status_code=404,
+                detail="Perfil do usuário não encontrado."
+            )
+
         return {
             "message": "Login realizado com sucesso.",
-            "access_token": response.session.access_token,
+            "access_token": access_token,
             "refresh_token": response.session.refresh_token,
             "user": {
                 "id": response.user.id,
-                "email": response.user.email
+                "email": response.user.email,
+                "name": profile["name"],
+                "role": profile["role"],
+                "photoUrl": profile.get("photo_url")
             }
         }
 
@@ -87,4 +119,47 @@ def login(data: LoginRequest):
         raise HTTPException(
             status_code=401,
             detail=str(error)
+        )
+
+
+@router.get("/me")
+def get_me(current_user=Depends(get_current_user)):
+    user = current_user["user"]
+    client = current_user["client"]
+
+    try:
+        profile_response = (
+            client
+            .table("profiles")
+            .select("id, name, role, photo_url")
+            .eq("id", user.id)
+            .single()
+            .execute()
+        )
+
+        profile = profile_response.data
+
+        if not profile:
+            raise HTTPException(
+                status_code=404,
+                detail="Perfil do usuário não encontrado."
+            )
+
+        return {
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": profile["name"],
+                "role": profile["role"],
+                "photoUrl": profile.get("photo_url")
+            }
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível carregar o perfil do usuário."
         )

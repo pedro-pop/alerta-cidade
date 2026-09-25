@@ -3,6 +3,7 @@ const DB = {
   DENUNCIAS: 'ac_denuncias',
   SESSION: 'ac_session',
   NOTIFICATIONS: 'ac_notifications',
+  CURRENT_USER: 'ac_current_user',
 };
 
 const CATEGORIES = {
@@ -101,9 +102,7 @@ function clearSession() {
 }
 
 function currentUser() {
-  const session = getSession();
-
-  return session ? findUserById(session.userId) : null;
+  return readJSON(DB.CURRENT_USER, null);
 }
 
 function findUserByEmail(email) {
@@ -362,6 +361,11 @@ async function registerCitizen({ name, email, password }) {
       })
     );
 
+    localStorage.setItem(
+  DB.CURRENT_USER,
+  JSON.stringify(data.user)
+);
+
     return {
       ok: true,
       user: data.user
@@ -415,6 +419,7 @@ async function login({ email, password }) {
 
 function logout() {
   apiLogout();
+  localStorage.removeItem(DB.CURRENT_USER);
 }
 
 
