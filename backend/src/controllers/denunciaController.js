@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const env = require('../config/env');
@@ -15,7 +16,7 @@ const STATUS_LABELS = {
 };
 
 const denunciaListSelect = {
-  id: true, title: true, description: true, category: true, location: true,
+  id: true, title: true, description: true, category: true, location: true, latitude: true, longitude: true,
   status: true, validated: true, removed: true, confirmedResolved: true,
   createdAt: true, updatedAt: true, authorId: true,
   author: { select: { id: true, name: true, photoUrl: true } },
@@ -31,6 +32,8 @@ function serializeDenuncia(d, likedByMe) {
     description: d.description,
     category: d.category,
     location: d.location,
+    latitude: d.latitude,
+    longitude: d.longitude,
     status: d.status,
     validated: d.validated,
     removed: d.removed,
@@ -121,48 +124,74 @@ async function getById(req, res) {
 
 // POST /api/denuncias — multipart/form-data, campo de arquivo opcional "media"
 async function create(req, res) {
-  const { title, description, category, location } = req.validated.body;
+  const { title, description, category, location, latitude, longitude } = req.validated.body;
 
-  const denuncia = await prisma.denuncia.create({
-    data: { title, description, category, location, authorId: req.user.id },
-  });
+  try {
+    const mediaData = req.file ? await prepareMedia(req.file) : null;
+    const full = await prisma.$transaction(async (transaction) => {
+      const denuncia = await transaction.denuncia.create({
+        data: {
+          title, description, category, location, latitude, longitude,
+          authorId: req.user.id,
+        },
+      });
 
-  if (req.file) {
-    await attachMediaOrFail(denuncia.id, req.file);
+      if (mediaData) {
+        await transaction.media.create({ data: { ...mediaData, denunciaId: denuncia.id } });
+      }
+      return transaction.denuncia.findUnique({ where: { id: denuncia.id }, select: denunciaListSelect });
+    });
+
+    res.status(201).json({ denuncia: serializeDenuncia(full, false) });
+  } catch (error) {
+    if (req.file) await fs.promises.unlink(req.file.path).catch(() => {});
+    throw error;
   }
-
-  const full = await prisma.denuncia.findUnique({ where: { id: denuncia.id }, select: denunciaListSelect });
-  res.status(201).json({ denuncia: serializeDenuncia(full, false) });
 }
 
-// Valida o arquivo recebido (tamanho por tipo + duração de vídeo) e só então
-// cria o registro de Media. Se algo não passar, apaga o arquivo do disco
-// antes de lançar o erro — não deixamos lixo órfão em /uploads.
-async function attachMediaOrFail(denunciaId, file) {
-  const isVideo = file.mimetype.startsWith('video/');
+async function prepareMedia(file) {
+  const { fileTypeFromFile } = await import('file-type');
+  const detectedType = await fileTypeFromFile(file.path);
+  const claimedType = file.mimetype.split('/')[0];
+  const actualType = detectedType?.mime.split('/')[0];
+
+  if (!detectedType || !['image', 'video'].includes(actualType) || claimedType !== actualType) {
+    throw ApiError.badRequest('O conteúdo do arquivo não corresponde a uma imagem ou vídeo válido.');
+  }
+
+  const isVideo = actualType === 'video';
 
   if (!isVideo) {
     const maxBytes = env.maxImageSizeMb * 1024 * 1024;
     if (file.size > maxBytes) {
-      fs.unlink(file.path, () => {});
       throw ApiError.badRequest(`Imagem excede o limite de ${env.maxImageSizeMb}MB.`);
     }
-    await prisma.media.create({ data: { type: 'PHOTO', url: publicUrlFor(file), denunciaId } });
-    return;
   }
 
-  const durationSeconds = await getVideoDurationSeconds(file.path);
-  // durationSeconds === null significa "não foi possível verificar" (ffprobe
-  // ausente no servidor) — nesse caso confiamos no limite já aplicado no
-  // front-end em vez de rejeitar o upload. Ver src/utils/videoDuration.js.
-  if (durationSeconds !== null && durationSeconds > env.maxVideoDurationSeconds) {
-    fs.unlink(file.path, () => {});
-    throw ApiError.badRequest(`Vídeo excede o limite de ${env.maxVideoDurationSeconds / 60} minutos.`);
+  let durationSeconds = null;
+  if (isVideo) {
+    durationSeconds = await getVideoDurationSeconds(file.path);
+    if (durationSeconds === null) {
+      throw ApiError.badRequest('Não foi possível validar a duração do vídeo. Tente outro arquivo.');
+    }
+    if (durationSeconds > env.maxVideoDurationSeconds) {
+      throw ApiError.badRequest(`Vídeo excede o limite de ${env.maxVideoDurationSeconds / 60} minutos.`);
+    }
   }
 
-  await prisma.media.create({
-    data: { type: 'VIDEO', url: publicUrlFor(file), durationSeconds, denunciaId },
-  });
+  const originalExtension = path.extname(file.filename);
+  const safePath = path.join(
+    path.dirname(file.path),
+    `${path.basename(file.filename, originalExtension)}.${detectedType.ext}`
+  );
+  await fs.promises.rename(file.path, safePath);
+  file.path = safePath;
+
+  return {
+    type: isVideo ? 'VIDEO' : 'PHOTO',
+    url: publicUrlFor(file),
+    durationSeconds,
+  };
 }
 
 // POST /api/denuncias/:id/like — alterna curtir/descurtir

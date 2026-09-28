@@ -163,6 +163,7 @@ select { background: var(--white); border: 1.5px solid var(--gray-200); border-r
 .location-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .field-label { font-size: 13px; font-weight: 700; color: var(--ink); }
 .location-map { height: 280px; min-height: 220px; border: 1.5px solid var(--gray-200); border-radius: 12px; overflow: hidden; z-index: 0; }
+.map-message { display: grid; place-items: center; height: 100%; padding: 24px; color: var(--gray-500); background: var(--gray-50); font-size: 13px; font-weight: 600; text-align: center; }
 .location-hint { color: var(--gray-500); font-size: 12px; margin: 0; }
 
 @media (max-width: 560px) {

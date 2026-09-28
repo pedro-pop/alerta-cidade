@@ -2,6 +2,10 @@ const { z } = require('zod');
 
 const CATEGORIES = ['BURACO', 'ILUMINACAO', 'SEMAFORO', 'LIXO', 'SEGURANCA'];
 const STATUSES = ['ABERTO', 'EM_ANALISE', 'EM_ANDAMENTO', 'RESOLVIDO', 'REJEITADO'];
+const coordinate = (min, max) => z.preprocess(
+  value => value === '' || value === undefined ? undefined : Number(value),
+  z.number().finite().min(min).max(max).optional()
+);
 
 const createDenunciaSchema = z.object({
   body: z.object({
@@ -11,7 +15,12 @@ const createDenunciaSchema = z.object({
     category: z.enum(CATEGORIES, {
       errorMap: () => ({ message: `Categoria deve ser uma de: ${CATEGORIES.join(', ')}.` }),
     }),
-  }),
+    latitude: coordinate(-90, 90),
+    longitude: coordinate(-180, 180),
+  }).refine(
+    body => (body.latitude === undefined) === (body.longitude === undefined),
+    { message: 'Latitude e longitude devem ser informadas juntas.', path: ['latitude'] }
+  ),
 });
 
 const listDenunciasQuerySchema = z.object({

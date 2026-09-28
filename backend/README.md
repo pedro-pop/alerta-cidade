@@ -50,8 +50,8 @@ Na raiz do projeto (um nível acima desta pasta):
 docker compose up --build
 ```
 
-Isso sobe o Postgres, roda as migrações (`prisma migrate deploy`) e inicia a
-API em `http://localhost:3333`. Para popular com dados de teste:
+Isso sobe o Postgres, sincroniza o schema Prisma sem aceitar perda de dados
+automaticamente e inicia a API em `http://localhost:3333`. Para popular com dados de teste:
 
 ```bash
 docker compose exec backend npm run seed
@@ -125,7 +125,7 @@ campo `media` — imagem OU vídeo, nunca os dois na mesma denúncia (mesma
 regra do front-end).
 
 Validações aplicadas, nessa ordem:
-1. `fileFilter` do multer rejeita qualquer coisa que não seja `image/*` ou `video/*`.
+1. `fileFilter` do multer filtra tipos declarados como imagem ou vídeo; o backend também verifica a assinatura real do arquivo.
 2. Limite de tamanho: `MAX_IMAGE_SIZE_MB` para foto, `MAX_VIDEO_SIZE_MB` para vídeo (variáveis de ambiente).
 3. Para vídeo, a **duração** é checada com `ffprobe` (ver limitação abaixo) contra `MAX_VIDEO_DURATION_SECONDS` (180s = 3 minutos).
 
@@ -134,13 +134,9 @@ responder o erro — não fica lixo em `uploads/`.
 
 ## Limitações conhecidas / próximos passos
 
-- **Validação de duração de vídeo depende do `ffmpeg` estar instalado no
-  servidor** (usamos o binário `ffprobe` via `child_process`). Se não
-  estiver instalado, a API *não bloqueia* o upload — assume que o limite já
-  foi respeitado no front-end e loga um aviso. Para produção, instale
-  `ffmpeg` na imagem/servidor (no `Dockerfile` baseado em Alpine, adicione
-  `RUN apk add --no-cache ffmpeg`) para que a validação do servidor passe a
-  valer de verdade.
+- **Validação de duração usa `ffprobe`**, incluído na imagem Docker via
+  `ffmpeg`. Se a duração não puder ser verificada, a API rejeita o vídeo em
+  vez de confiar apenas na validação do navegador.
 - **Armazenamento de mídia é local (disco)**. Funciona bem para um único
   servidor; para múltiplas instâncias/escala horizontal, o próximo passo
   natural é trocar `src/middlewares/upload.js` por um adapter para um object
@@ -153,7 +149,6 @@ responder o erro — não fica lixo em `uploads/`.
 - **Testes automatizados**: a estrutura (`app.js` sem `.listen()`) já foi
   pensada para permitir testes de integração com `supertest` futuramente,
   mas nenhum teste foi escrito ainda.
-- **Integração com o front-end**: o front-end atual (`../frontend`) ainda
-  fala com LocalStorage, não com esta API. Trocar isso é uma tarefa própria
-  (substituir cada chamada de `data.js` por uma chamada `fetch` a este
-  backend, guardar o token, tratar estados de carregamento/erro).
+- **Migrações para produção**: o container sincroniza o schema sem aceitar
+  perda de dados automaticamente. Para deploys com histórico e revisão de
+  mudanças, crie migrações Prisma e use `prisma migrate deploy`.

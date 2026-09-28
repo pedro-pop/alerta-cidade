@@ -64,6 +64,8 @@ model Denuncia {
   description       String
   category          Categoria
   location          String
+  latitude          Float?
+  longitude         Float?
   status            Status    @default(ABERTO)
   validated         Boolean   @default(false)
   removed           Boolean   @default(false)

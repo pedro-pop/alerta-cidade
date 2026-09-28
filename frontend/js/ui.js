@@ -25,9 +25,6 @@ const state = {
 };
 
 const app = document.getElementById('app');
-let locationMap = null;
-let locationMarker = null;
-let locationLookupId = 0;
 
 function go(screen, extra) {
   state.screen = screen;
@@ -96,11 +93,11 @@ function initials(name) {
   return name.split(' ').filter(Boolean).slice(0, 2).map(n => n[0].toUpperCase()).join('');
 }
 
-function avatarHTML(userId, fallbackName, sizeClass) {
+function avatarHTML(userId, fallbackName, sizeClass, providedPhoto) {
   const u = findUserById(userId);
   const name = u ? u.name : (fallbackName || '?');
   const cls = 'avatar' + (sizeClass ? ' ' + sizeClass : '');
-  const photoUrl = (u && (u.photo || u.photoUrl)) || null;
+  const photoUrl = providedPhoto || (u && (u.photo || u.photoUrl)) || null;
   if (photoUrl) return `<img src="${photoUrl}" class="${cls} avatar-img" alt="${escapeHTML(name)}">`;
   return `<span class="${cls}">${initials(name)}</span>`;
 }
@@ -112,11 +109,7 @@ function render() {
   if (!user) { state.screen = 'auth'; }
   else if (state.screen === 'auth') { state.screen = 'dashboard'; }
 
-  if (locationMap) {
-    locationMap.remove();
-    locationMap = null;
-    locationMarker = null;
-  }
+  LocationMap.destroy();
 
   let body = '';
   if (!user) {
@@ -278,11 +271,11 @@ function registerForm() {
     <p class="form-sub">Toda conta criada aqui é automaticamente do tipo <b>cidadão</b>.</p>
     <label class="field">
       <span>Nome completo</span>
-      <input type="text" name="name" placeholder="Seu nome" required>
+      <input type="text" name="name" placeholder="Seu nome" required minlength="2" maxlength="120" autocomplete="name">
     </label>
     <label class="field">
       <span>E-mail</span>
-      <input type="email" name="email" placeholder="voce@email.com" required>
+      <input type="email" name="email" placeholder="voce@email.com" required maxlength="160" autocomplete="email">
     </label>
     <label class="field">
       <span>Senha</span>
@@ -384,7 +377,7 @@ function denunciaCard(d, user) {
         <span class="card-author">por ${escapeHTML(d.authorName)} · ${timeAgo(d.createdAt)}</span>
         <span class="card-stats">
           <button class="mini-btn ${liked ? 'liked' : ''}" data-action="like" data-id="${d.id}" title="Curtir">${liked ? ICONS.heartFill : ICONS.heart}${d.likes.length}</button>
-          <span class="mini-stat">${ICONS.comment}${d.comments.length}</span>
+          <span class="mini-stat">${ICONS.comment}${d.commentsCount ?? d.comments.length}</span>
         </span>
       </div>
       ${d.validated ? `<div class="tag-validated">${ICONS.check} Validado pela moderação</div>` : ''}
@@ -472,58 +465,33 @@ function createScreen(user) {
 
 function initializeLocationMap() {
   const mapElement = document.getElementById('location-map');
-  if (!mapElement || !window.L) return;
+  if (!mapElement) return;
 
   const draft = state.draft || {};
-  const defaultCenter = [-15.7801, -47.9292];
-  const hasDraftCoordinates = Number.isFinite(Number(draft.latitude)) && Number.isFinite(Number(draft.longitude));
-  const center = hasDraftCoordinates ? [Number(draft.latitude), Number(draft.longitude)] : defaultCenter;
+  const latitude = Number(draft.latitude);
+  const longitude = Number(draft.longitude);
+  const hasDraftCoordinates = draft.latitude !== '' && draft.longitude !== ''
+    && Number.isFinite(latitude) && Number.isFinite(longitude)
+    && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 
-  locationMap = L.map(mapElement).setView(center, hasDraftCoordinates ? 16 : 4);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap',
-    maxZoom: 19,
-  }).addTo(locationMap);
-
-  if (hasDraftCoordinates) setLocationMarker(center[0], center[1], false);
-  locationMap.on('click', (event) => setLocationMarker(event.latlng.lat, event.latlng.lng, true));
-}
-
-function setLocationMarker(latitude, longitude, centerMap) {
-  if (!locationMap) return;
-  if (locationMarker) locationMarker.setLatLng([latitude, longitude]);
-  else locationMarker = L.marker([latitude, longitude]).addTo(locationMap);
-  if (centerMap) locationMap.setView([latitude, longitude], 16);
-
-  const form = document.querySelector('form[data-action="submit-create"]');
-  const input = form && form.elements.location;
-  if (!input) return;
-  input.value = `Coordenadas: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-  state.draft = { ...state.draft, latitude, longitude };
-  persistDraftFromForm(form);
-  reverseGeocode(latitude, longitude, input, ++locationLookupId);
-}
-
-async function reverseGeocode(latitude, longitude, input, lookupId) {
-  try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=pt-BR`);
-    if (!response.ok) return;
-    const result = await response.json();
-    const address = result.display_name;
-    if (!address || !input.isConnected || lookupId !== locationLookupId) return;
-    input.value = `${address} (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`.slice(0, 140);
-    persistDraftFromForm(input.form);
-  } catch (error) {
-    // As coordenadas já foram preenchidas; o endereço é apenas complementar.
-  }
+  LocationMap.init(mapElement, {
+    coordinates: hasDraftCoordinates ? { lat: latitude, lng: longitude } : null,
+    onSelect: ({ latitude: selectedLatitude, longitude: selectedLongitude, address }) => {
+      const form = document.querySelector('form[data-action="submit-create"]');
+      if (!form) return;
+      const locationInput = form.elements.location;
+      form.elements.latitude.value = selectedLatitude.toFixed(6);
+      form.elements.longitude.value = selectedLongitude.toFixed(6);
+      locationInput.value = address
+        ? `${address} (${selectedLatitude.toFixed(6)}, ${selectedLongitude.toFixed(6)})`.slice(0, 140)
+        : `Coordenadas: ${selectedLatitude.toFixed(6)}, ${selectedLongitude.toFixed(6)}`;
+      state.draft = { ...state.draft, latitude: selectedLatitude, longitude: selectedLongitude };
+      persistDraftFromForm(form);
+    },
+  });
 }
 
 function useCurrentLocation() {
-  if (!navigator.geolocation) {
-    showToast('Seu navegador não oferece geolocalização.', 'error');
-    return;
-  }
-
   const form = document.querySelector('form[data-action="submit-create"]');
   const input = form && form.elements.location;
   if (input) {
@@ -532,14 +500,10 @@ function useCurrentLocation() {
     persistDraftFromForm(form);
   }
 
-  navigator.geolocation.getCurrentPosition(
-    ({ coords }) => setLocationMarker(coords.latitude, coords.longitude, true),
-    () => {
-      if (input && input.isConnected) input.value = '';
-      showToast('Não foi possível acessar sua localização.', 'error');
-    },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-  );
+  LocationMap.useCurrentLocation(message => {
+    if (input && input.isConnected) input.value = '';
+    showToast(message, 'error');
+  });
 }
 
 function mediaPickerHTML() {
@@ -595,7 +559,7 @@ function detailScreen(user) {
         </div>
         <h1 class="detail-title">${escapeHTML(d.title)}</h1>
         <div class="card-meta">${ICONS.pin}<span>${escapeHTML(d.location)}</span></div>
-        ${d.latitude && d.longitude ? `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(d.latitude)}&mlon=${encodeURIComponent(d.longitude)}#map=18/${encodeURIComponent(d.latitude)}/${encodeURIComponent(d.longitude)}" target="_blank" rel="noopener">${ICONS.pin} Ver ponto no mapa</a>` : ''}
+        ${d.latitude != null && d.longitude != null ? `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(d.latitude)}&mlon=${encodeURIComponent(d.longitude)}#map=18/${encodeURIComponent(d.latitude)}/${encodeURIComponent(d.longitude)}" target="_blank" rel="noopener">${ICONS.pin} Ver ponto no mapa</a>` : ''}
         <p class="detail-desc">${escapeHTML(d.description)}</p>
         <div class="detail-author">Relatado por <b>${escapeHTML(d.authorName)}</b> em ${formatDate(d.createdAt)}</div>
 
@@ -651,7 +615,7 @@ function renderCommentNode(c, d, isMod, depth) {
   return `
   <div class="comment-thread" style="margin-left:${indent}px">
     <div class="comment">
-      ${avatarHTML(c.authorId, c.authorName, 'small')}
+      ${avatarHTML(c.authorId, c.authorName, 'small', c.authorPhoto)}
       <div class="comment-body">
         <div class="comment-head"><b>${escapeHTML(c.authorName)}</b><small>${timeAgo(c.createdAt)}</small></div>
         <p>${escapeHTML(c.text)}</p>
@@ -712,6 +676,7 @@ function profileScreen(user) {
 
   return `
   <div class="page-narrow">
+    <input id="profile-photo-input" type="file" accept="image/*" hidden>
     <div class="profile-head card">
       <button type="button" class="avatar-edit-wrap" data-action="open-profile-photo-source" title="Alterar foto de perfil">
         ${avatarHTML(user.id, user.name, 'large')}
@@ -1018,7 +983,7 @@ function readFileAsMedia(file, type, durationSeconds) {
   reader.readAsDataURL(file);
 }
 
-function handleProfilePhotoFileSelect(input) {
+async function handleProfilePhotoFileSelect(input) {
   const file = input.files && input.files[0];
   input.value = '';
   if (!file) return;
@@ -1029,10 +994,11 @@ function handleProfilePhotoFileSelect(input) {
   }
 
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     const user = currentUser();
     if (!user) return;
-    updateUserPhoto(user.id, reader.result);
+    const result = await updateUserPhoto(user.id, reader.result);
+    if (!result.ok) return showToast(result.msg, 'error');
     render();
     showToast('Foto de perfil atualizada!', 'success');
   };
@@ -1041,7 +1007,7 @@ function handleProfilePhotoFileSelect(input) {
 
 /* ---------------- delegação de eventos (em document, para alcançar o #modal-root também) ---------------- */
 
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   // fecha o dropdown de notificações ao clicar fora dele
   const outsideNotifClick = state.notifOpen && !e.target.closest('.notif-wrap');
   if (outsideNotifClick) state.notifOpen = false;
@@ -1080,6 +1046,22 @@ document.addEventListener('click', (e) => {
 
   switch (action) {
     case 'go':
+      if (el.dataset.screen === 'detail' && el.dataset.id) {
+        try {
+          await refreshDenuncia(el.dataset.id);
+        } catch (error) {
+          showToast(error.message, 'error');
+          return;
+        }
+      }
+      if (el.dataset.screen === 'admin') {
+        try {
+          await refreshUsers();
+        } catch (error) {
+          showToast(error.message, 'error');
+          return;
+        }
+      }
       go(el.dataset.screen, el.dataset.id ? { selectedId: el.dataset.id } : { selectedId: null });
       break;
 
@@ -1100,34 +1082,47 @@ document.addEventListener('click', (e) => {
       break;
 
     case 'like':
-      toggleLike(el.dataset.id);
+      {
+      const result = await toggleLike(el.dataset.id);
+      if (!result.ok) showToast(result.msg, 'error');
       render();
       break;
+      }
 
     case 'confirm-resolved':
-      citizenConfirmResolved(el.dataset.id);
+      {
+      const result = await citizenConfirmResolved(el.dataset.id);
+      if (!result.ok) return showToast(result.msg, 'error');
       render();
       showToast('Obrigado por confirmar! ✅', 'success');
       break;
+      }
 
     case 'mod-validate':
-      moderateValidate(el.dataset.id);
+      {
+      const result = await moderateValidate(el.dataset.id);
+      if (!result.ok) return showToast(result.msg, 'error');
       render();
       showToast('Denúncia validada.', 'success');
       break;
+      }
 
     case 'mod-remove':
       if (confirm('Remover este conteúdo? Ele deixará de ser exibido publicamente.')) {
-        moderateRemove(el.dataset.id);
+        const result = await moderateRemove(el.dataset.id);
+        if (!result.ok) return showToast(result.msg, 'error');
         go('dashboard');
         showToast('Conteúdo removido pela moderação.', 'success');
       }
       break;
 
     case 'remove-comment':
-      removeComment(el.dataset.id, el.dataset.cid);
+      {
+      const result = await removeComment(el.dataset.id, el.dataset.cid);
+      if (!result.ok) return showToast(result.msg, 'error');
       render();
       break;
+      }
 
     case 'toggle-reply':
       state.replyingTo = state.replyingTo === el.dataset.id ? null : el.dataset.id;
@@ -1140,14 +1135,24 @@ document.addEventListener('click', (e) => {
       break;
 
     case 'mark-all-read': {
-      const u = currentUser();
-      if (u) markAllRead(u.id);
+      const result = await markAllRead();
+      if (!result.ok) return showToast(result.msg, 'error');
       render();
       break;
     }
 
     case 'open-notification':
-      markOneRead(el.dataset.id);
+      await markOneRead(el.dataset.id);
+      if (!el.dataset.denuncia) {
+        go('dashboard');
+        break;
+      }
+      try {
+        await refreshDenuncia(el.dataset.denuncia);
+      } catch (error) {
+        showToast(error.message, 'error');
+        return;
+      }
       go('detail', { selectedId: el.dataset.denuncia });
       break;
 
@@ -1204,9 +1209,12 @@ document.addEventListener('click', (e) => {
         onCamera: () => openCameraCapture({
           allowVideo: false,
           title: 'Tirar foto de perfil',
-          onDone: (res) => {
+          onDone: async (res) => {
             const user = currentUser();
-            if (user) updateUserPhoto(user.id, res.dataUrl);
+            if (user) {
+              const result = await updateUserPhoto(user.id, res.dataUrl);
+              if (!result.ok) return showToast(result.msg, 'error');
+            }
             render();
             showToast('Foto de perfil atualizada!', 'success');
           },
@@ -1351,12 +1359,17 @@ document.addEventListener('submit', async (e) => {
 
       state.screen = 'dashboard';
       render();
-      showToast('Conta criada com sucesso!', 'success');
+      showToast(res.warning || 'Conta criada com sucesso!', res.warning ? 'error' : 'success');
       break;
     }
 
     case 'submit-create': {
-      const res = createDenuncia({ ...data, media: state.pendingMedia });
+      const res = await createDenuncia({
+        ...data,
+        latitude: data.latitude ? Number(data.latitude) : undefined,
+        longitude: data.longitude ? Number(data.longitude) : undefined,
+        media: state.pendingMedia,
+      });
 
       if (!res.ok) return showToast(res.msg, 'error');
 
@@ -1366,38 +1379,39 @@ document.addEventListener('submit', async (e) => {
       state.draft = null;
       state.pendingMedia = null;
 
+      await refreshDenuncia(res.denuncia.id);
       go('detail', { selectedId: res.denuncia.id });
       showToast('Denúncia publicada!', 'success');
       break;
     }
 
     case 'submit-comment': {
-      addComment(form.dataset.id, data.text);
+      const result = await addComment(form.dataset.id, data.text);
+      if (!result.ok) return showToast(result.msg, 'error');
       form.reset();
       render();
       break;
     }
 
     case 'submit-reply': {
-      addComment(form.dataset.id, data.text, form.dataset.parent);
+      const result = await addComment(form.dataset.id, data.text, form.dataset.parent);
+      if (!result.ok) return showToast(result.msg, 'error');
       state.replyingTo = null;
       render();
       break;
     }
 
     case 'admin-status': {
-      adminSetStatus(form.dataset.id, data.status);
+      const result = await adminSetStatus(form.dataset.id, data.status);
+      if (!result.ok) return showToast(result.msg, 'error');
       render();
       showToast('Status atualizado.', 'success');
       break;
     }
 
     case 'admin-respond': {
-      const res = adminRespond(form.dataset.id, data.response || '');
-
-      if (res && res.ok === false) {
-        return showToast('Escreva uma resposta antes de publicar.', 'error');
-      }
+      const res = await adminRespond(form.dataset.id, data.response || '');
+      if (!res.ok) return showToast(res.msg, 'error');
 
       render();
       showToast('Resposta oficial publicada.', 'success');
@@ -1405,7 +1419,7 @@ document.addEventListener('submit', async (e) => {
     }
 
     case 'submit-create-user': {
-      const res = createUserByAdmin(data);
+      const res = await createUserByAdmin(data);
 
       if (!res.ok) return showToast(res.msg, 'error');
 
@@ -1416,7 +1430,7 @@ document.addEventListener('submit', async (e) => {
     }
 
     case 'submit-reset-password': {
-      const res = resetUserPassword(form.dataset.id, data.password);
+      const res = await resetUserPassword(form.dataset.id, data.password);
 
       if (!res.ok) return showToast(res.msg, 'error');
 
@@ -1432,6 +1446,9 @@ document.addEventListener('submit', async (e) => {
 
 /* ---------------- inicialização ---------------- */
 
-ensureSeedData();
-if (currentUser()) state.screen = 'dashboard';
 render();
+(async function bootstrap() {
+  const restored = await initializeData();
+  state.screen = restored ? 'dashboard' : 'auth';
+  render();
+})();

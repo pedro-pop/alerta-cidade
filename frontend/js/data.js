@@ -1,11 +1,3 @@
-const DB = {
-  USERS: 'ac_users',
-  DENUNCIAS: 'ac_denuncias',
-  SESSION: 'ac_session',
-  NOTIFICATIONS: 'ac_notifications',
-  CURRENT_USER: 'ac_current_user',
-};
-
 const CATEGORIES = {
   buraco: { label: 'Buraco na via', icon: '🕳️' },
   iluminacao: { label: 'Iluminação', icon: '💡' },
@@ -30,27 +22,25 @@ const ROLE_LABELS = {
 };
 
 const DRAFT_TTL_MS = 30 * 60 * 1000;
-
-function uid(prefix) {
-  return `${prefix ? `${prefix}_` : ''}${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
-}
-
-function nowISO() {
-  return new Date().toISOString();
-}
+const DRAFT_PREFIX = 'ac_draft_';
+['ac_users', 'ac_denuncias', 'ac_session', 'ac_notifications', 'ac_current_user', 'ac_access_token']
+  .forEach(key => localStorage.removeItem(key));
+let usersCache = [];
+let denunciasCache = [];
+let notificationsCache = [];
+let signedInUser = null;
+let usersLoaded = false;
 
 function formatDate(iso) {
   const date = new Date(iso);
-
   return `${date.toLocaleDateString('pt-BR')} às ${date.toLocaleTimeString('pt-BR', {
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   })}`;
 }
 
 function escapeHTML(value) {
   if (value === null || value === undefined) return '';
-
   return String(value)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -59,774 +49,396 @@ function escapeHTML(value) {
     .replaceAll("'", '&#39;');
 }
 
-function readJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (error) {
-    return fallback;
-  }
+function toUiEnum(value) {
+  return String(value || '').toLowerCase();
 }
 
-function writeJSON(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+function toApiEnum(value) {
+  return String(value || '').toUpperCase();
 }
 
-function getUsers() {
-  return readJSON(DB.USERS, []);
+function normalizeUser(user) {
+  if (!user) return null;
+  const role = toUiEnum(user.role);
+  return { ...user, role, photo: user.photoUrl || user.photo || null, photoUrl: user.photoUrl || user.photo || null };
 }
 
-function saveUsers(users) {
-  writeJSON(DB.USERS, users);
+function normalizeComment(comment) {
+  const author = comment.author || {};
+  return {
+    id: comment.id,
+    parentId: comment.parentId || null,
+    authorId: comment.authorId || author.id,
+    authorName: comment.authorName || author.name || 'Usuário',
+    authorPhoto: author.photoUrl || null,
+    text: comment.text,
+    createdAt: comment.createdAt,
+  };
 }
 
-function getDenuncias() {
-  return readJSON(DB.DENUNCIAS, []);
-}
-
-function saveDenuncias(denuncias) {
-  writeJSON(DB.DENUNCIAS, denuncias);
-}
-
-function getSession() {
-  return readJSON(DB.SESSION, null);
-}
-
-function setSession(userId) {
-  writeJSON(DB.SESSION, { userId });
-}
-
-function clearSession() {
-  localStorage.removeItem(DB.SESSION);
+function normalizeDenuncia(raw, comments) {
+  const author = raw.author || {};
+  const media = raw.media || null;
+  const count = Number(raw.likesCount || 0);
+  const liked = !!raw.likedByMe;
+  const likes = Array.from({ length: count }, (_, index) =>
+    liked && index === 0 ? (signedInUser && signedInUser.id) || 'me' : `like-${index}`
+  );
+  return {
+    id: raw.id,
+    title: raw.title,
+    description: raw.description,
+    category: toUiEnum(raw.category),
+    location: raw.location,
+    latitude: raw.latitude ?? null,
+    longitude: raw.longitude ?? null,
+    status: toUiEnum(raw.status),
+    validated: !!raw.validated,
+    removido: !!raw.removed,
+    confirmedResolved: !!raw.confirmedResolved,
+    createdAt: raw.createdAt,
+    authorId: raw.authorId || author.id,
+    authorName: author.name || raw.authorName || 'Usuário',
+    authorPhoto: author.photoUrl || null,
+    media: media ? {
+      ...media,
+      type: toUiEnum(media.type),
+      url: apiAssetUrl(media.url),
+    } : null,
+    likes,
+    likedByMe: liked,
+    comments: (comments || []).map(normalizeComment),
+    commentsCount: raw.commentsCount || (comments || []).length,
+    officialResponse: raw.officialResponse ? {
+      ...raw.officialResponse,
+      authorName: raw.officialResponse.authorName || raw.officialResponse.author?.name || 'Equipe responsável',
+      date: raw.officialResponse.createdAt || raw.officialResponse.date,
+    } : null,
+  };
 }
 
 function currentUser() {
-  return readJSON(DB.CURRENT_USER, null);
+  return signedInUser;
 }
 
-function findUserByEmail(email) {
-  return getUsers().find(
-    user => user.email.toLowerCase() === email.toLowerCase()
-  );
+function getUsers() {
+  return usersCache;
+}
+
+function getDenuncias() {
+  return denunciasCache;
+}
+
+function getDenunciaById(id) {
+  return denunciasCache.find(denuncia => denuncia.id === id) || null;
 }
 
 function findUserById(id) {
-  return getUsers().find(user => user.id === id) || null;
-}
-
-
-function ensureSeedData() {
-  if (getUsers().length) return;
-
-  const users = [
-    ['Super Admin', 'super@urbano.com', 'super123', 'superadmin'],
-    ['Carlos Mendes', 'admin@urbano.com', 'admin123', 'admin'],
-    ['Fernanda Lima', 'moderadora@urbano.com', 'mod123', 'moderador'],
-    ['Ana Souza', 'ana@mail.com', '123456', 'cidadao'],
-    ['Pedro Rocha', 'pedro@mail.com', '123456', 'cidadao'],
-  ].map(([name, email, password, role]) => ({
-    id: uid('u'),
-    name,
-    email,
-    password,
-    role,
-    photo: null,
-    photoUrl: null,
-    createdAt: nowISO()
-  }));
-
-  saveUsers(users);
-
-  const ana = users.find(user => user.email === 'ana@mail.com');
-  const pedro = users.find(user => user.email === 'pedro@mail.com');
-  const admin = users.find(user => user.role === 'admin');
-
-  const daysAgo = days =>
-    new Date(Date.now() - days * 86400000).toISOString();
-
-  saveDenuncias([
-    {
-      id: uid('d'),
-      title: 'Buraco grande na Av. das Palmeiras',
-      description: 'Buraco profundo próximo ao ponto de ônibus.',
-      category: 'buraco',
-      location: 'Av. das Palmeiras, 450 - Centro',
-      media: null,
-      authorId: ana.id,
-      authorName: ana.name,
-      createdAt: daysAgo(6),
-      status: 'em_andamento',
-      validated: true,
-      removido: false,
-      confirmedResolved: false,
-      officialResponse: {
-        text: 'Equipe de manutenção acionada.',
-        authorName: admin.name,
-        date: daysAgo(2)
-      },
-      likes: [pedro.id],
-      comments: []
-    },
-
-    {
-      id: uid('d'),
-      title: 'Poste de luz apagado há 2 semanas',
-      description: 'A rua fica totalmente escura à noite.',
-      category: 'iluminacao',
-      location: 'Rua das Acácias, esquina com Rua Bela Vista',
-      media: null,
-      authorId: pedro.id,
-      authorName: pedro.name,
-      createdAt: daysAgo(4),
-      status: 'aberto',
-      validated: false,
-      removido: false,
-      confirmedResolved: false,
-      officialResponse: null,
-      likes: [ana.id],
-      comments: []
-    },
-
-    {
-      id: uid('d'),
-      title: 'Lixo acumulado em terreno baldio',
-      description: 'Moradores estão descartando entulho irregularmente.',
-      category: 'lixo',
-      location: 'Rua Tiradentes, 120',
-      media: null,
-      authorId: ana.id,
-      authorName: ana.name,
-      createdAt: daysAgo(15),
-      status: 'resolvido',
-      validated: true,
-      removido: false,
-      confirmedResolved: true,
-      officialResponse: {
-        text: 'Terreno limpo pela equipe de zeladoria urbana.',
-        authorName: admin.name,
-        date: daysAgo(9)
-      },
-      likes: [pedro.id, admin.id],
-      comments: []
-    }
-  ]);
-}
-
-
-function getNotifications() {
-  return readJSON(DB.NOTIFICATIONS, []);
-}
-
-function addNotification(userId, message, denunciaId) {
-  if (userId) {
-    writeJSON(
-      DB.NOTIFICATIONS,
-      [
-        {
-          id: uid('n'),
-          userId,
-          message,
-          denunciaId,
-          read: false,
-          createdAt: nowISO()
-        },
-        ...getNotifications()
-      ].slice(0, 300)
-    );
-  }
+  return usersCache.find(user => user.id === id) || (signedInUser?.id === id ? signedInUser : null);
 }
 
 function getUserNotifications(userId) {
-  return getNotifications()
-    .filter(notification => notification.userId === userId)
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt) - new Date(a.createdAt)
-    );
+  return notificationsCache.filter(notification => notification.userId === userId)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 function unreadCountFor(userId) {
-  return getUserNotifications(userId)
-    .filter(notification => !notification.read)
-    .length;
+  return getUserNotifications(userId).filter(notification => !notification.read).length;
 }
 
-function markAllRead(userId) {
-  const notifications = getNotifications();
-
-  notifications.forEach(notification => {
-    if (notification.userId === userId) {
-      notification.read = true;
-    }
-  });
-
-  writeJSON(DB.NOTIFICATIONS, notifications);
+async function refreshDenuncias() {
+  const rows = await apiGetDenuncias();
+  denunciasCache = rows.map(row => normalizeDenuncia(row));
+  return denunciasCache;
 }
 
-function markOneRead(id) {
-  const notifications = getNotifications();
+async function refreshDenuncia(id) {
+  const { denuncia, comments } = await apiGetDenuncia(id);
+  const normalized = normalizeDenuncia(denuncia, comments || []);
+  const index = denunciasCache.findIndex(item => item.id === id);
+  if (index < 0) denunciasCache.unshift(normalized);
+  else denunciasCache[index] = normalized;
+  return normalized;
+}
 
-  const notification = notifications.find(
-    item => item.id === id
-  );
-
-  if (notification) {
-    notification.read = true;
+async function refreshNotifications() {
+  if (!signedInUser) {
+    notificationsCache = [];
+    return [];
   }
-
-  writeJSON(DB.NOTIFICATIONS, notifications);
+  const data = await apiGetNotifications();
+  notificationsCache = (data.notifications || []).map(item => ({
+    ...item,
+    denunciaId: item.denunciaId || '',
+  }));
+  return notificationsCache;
 }
 
+async function refreshUsers() {
+  const data = await apiGetUsers();
+  usersCache = (data.users || []).map(normalizeUser);
+  usersLoaded = true;
+  return usersCache;
+}
+
+async function initializeData() {
+  if (!getAccessToken()) return false;
+  try {
+    const data = await apiMe();
+    signedInUser = normalizeUser(data.user);
+    await Promise.all([refreshDenuncias(), refreshNotifications()]);
+    if (signedInUser.role === 'superadmin') await refreshUsers();
+    return true;
+  } catch (error) {
+    apiLogout();
+    signedInUser = null;
+    usersCache = [];
+    denunciasCache = [];
+    notificationsCache = [];
+    return false;
+  }
+}
 
 function draftKey(userId) {
-  return `ac_draft_${userId}`;
+  return `${DRAFT_PREFIX}${userId}`;
 }
 
 function getDraft(userId) {
-  const draft = readJSON(draftKey(userId), null);
-
-  if (!draft) return null;
-
-  if (Date.now() - draft.savedAt > DRAFT_TTL_MS) {
-    clearDraft(userId);
+  try {
+    const draft = JSON.parse(localStorage.getItem(draftKey(userId)) || 'null');
+    if (!draft) return null;
+    if (Date.now() - draft.savedAt > DRAFT_TTL_MS) {
+      clearDraft(userId);
+      return null;
+    }
+    return draft;
+  } catch {
     return null;
   }
-
-  return draft;
 }
 
 function saveDraft(userId, draft) {
-  writeJSON(
-    draftKey(userId),
-    {
-      ...draft,
-      savedAt: Date.now()
-    }
-  );
+  localStorage.setItem(draftKey(userId), JSON.stringify({ ...draft, savedAt: Date.now() }));
 }
 
 function clearDraft(userId) {
   localStorage.removeItem(draftKey(userId));
 }
 
-
-/* =========================
-   AUTENTICAÇÃO VIA API
-========================= */
+function validationError(message) {
+  return { ok: false, msg: message };
+}
 
 async function registerCitizen({ name, email, password }) {
   name = (name || '').trim();
   email = (email || '').trim().toLowerCase();
-
-  if (!name || !email || !password) {
-    return {
-      ok: false,
-      msg: 'Preencha todos os campos.'
-    };
-  }
-
-  if (password.length < 4) {
-    return {
-      ok: false,
-      msg: 'Senha deve ter ao menos 4 caracteres.'
-    };
-  }
-
+  if (!name || !email || !password) return validationError('Preencha todos os campos.');
+  if (password.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
   try {
-    const data = await apiRegister({
-      name,
-      email,
-      password
-    });
-
-    /*
-     * O Supabase pode exigir confirmação de e-mail.
-     * Nesse caso o cadastro funciona, mas ainda não existe
-     * uma sessão para o usuário.
-     */
-
-    if (!data.session) {
+    const result = await apiRegister({ name, email, password });
+    signedInUser = normalizeUser(result.user);
+    usersCache = [signedInUser];
+    try {
+      await Promise.all([refreshDenuncias(), refreshNotifications()]);
+      return { ok: true, user: signedInUser };
+    } catch (error) {
       return {
         ok: true,
-        requiresConfirmation: true,
-        msg: 'Cadastro realizado! Confirme seu e-mail para entrar.'
+        user: signedInUser,
+        warning: 'Conta criada, mas não foi possível carregar todos os dados. Atualize a página para tentar novamente.',
       };
     }
-
-    localStorage.setItem(
-      'ac_session',
-      JSON.stringify({
-        userId: data.user.id
-      })
-    );
-
-    localStorage.setItem(
-  DB.CURRENT_USER,
-  JSON.stringify(data.user)
-);
-
-    return {
-      ok: true,
-      user: data.user
-    };
-
   } catch (error) {
-    return {
-      ok: false,
-      msg: error.message
-    };
+    return validationError(error.message);
   }
 }
-
 
 async function login({ email, password }) {
   email = (email || '').trim().toLowerCase();
-
-  if (!email || !password) {
-    return {
-      ok: false,
-      msg: 'Preencha e-mail e senha.'
-    };
-  }
-
+  if (!email || !password) return validationError('Preencha e-mail e senha.');
   try {
-    const data = await apiLogin({
-      email,
-      password
-    });
-
-    localStorage.setItem(
-      'ac_session',
-      JSON.stringify({
-        userId: data.user.id
-      })
-    );
-
-    return {
-      ok: true,
-      user: data.user
-    };
-
+    const result = await apiLogin({ email, password });
+    signedInUser = normalizeUser(result.user);
+    usersCache = [signedInUser];
+    await Promise.all([refreshDenuncias(), refreshNotifications()]);
+    if (signedInUser.role === 'superadmin') await refreshUsers();
+    return { ok: true, user: signedInUser };
   } catch (error) {
-    return {
-      ok: false,
-      msg: error.message
-    };
+    return validationError(error.message);
   }
 }
-
 
 function logout() {
   apiLogout();
-  localStorage.removeItem(DB.CURRENT_USER);
+  signedInUser = null;
+  usersCache = [];
+  denunciasCache = [];
+  notificationsCache = [];
+  usersLoaded = false;
 }
 
-
-/* =========================
-   ADMIN / USUÁRIOS
-========================= */
-
-function createUserByAdmin({ name, email, password, role }) {
+async function createUserByAdmin({ name, email, password, role }) {
   name = (name || '').trim();
   email = (email || '').trim().toLowerCase();
   role = (role || 'admin').toLowerCase();
-
-  if (!name || !email || !password) {
-    return {
-      ok: false,
-      msg: 'Preencha todos os campos.'
-    };
-  }
-
-  if (password.length < 4) {
-    return {
-      ok: false,
-      msg: 'Senha deve ter ao menos 4 caracteres.'
-    };
-  }
-
-  if (!['admin', 'moderador', 'superadmin'].includes(role)) {
-    return {
-      ok: false,
-      msg: 'Função inválida.'
-    };
-  }
-
-  if (findUserByEmail(email)) {
-    return {
-      ok: false,
-      msg: 'Este e-mail já está cadastrado.'
-    };
-  }
-
-  const user = {
-    id: uid('u'),
-    name,
-    email,
-    password,
-    role,
-    photo: null,
-    photoUrl: null,
-    createdAt: nowISO()
-  };
-
-  saveUsers([
-    ...getUsers(),
-    user
-  ]);
-
-  return {
-    ok: true,
-    user
-  };
-}
-
-
-function resetUserPassword(userId, newPassword) {
-  const users = getUsers();
-
-  const user = users.find(
-    item => item.id === userId
-  );
-
-  if (!user) {
-    return {
-      ok: false,
-      msg: 'Usuário não encontrado.'
-    };
-  }
-
-  if (!newPassword || newPassword.length < 4) {
-    return {
-      ok: false,
-      msg: 'Senha deve ter ao menos 4 caracteres.'
-    };
-  }
-
-  user.password = newPassword;
-
-  saveUsers(users);
-
-  return {
-    ok: true
-  };
-}
-
-
-function updateUserPhoto(userId, photoDataUrl) {
-  const users = getUsers();
-
-  const user = users.find(
-    item => item.id === userId
-  );
-
-  if (!user) {
-    return {
-      ok: false
-    };
-  }
-
-  user.photo = photoDataUrl;
-  user.photoUrl = photoDataUrl;
-
-  saveUsers(users);
-
-  return {
-    ok: true,
-    user
-  };
-}
-
-
-/* =========================
-   DENÚNCIAS
-========================= */
-
-function createDenuncia({
-  title,
-  description,
-  category,
-  location,
-  latitude,
-  longitude,
-  media
-}) {
-  const user = currentUser();
-
-  if (!user) {
-    return {
-      ok: false,
-      msg: 'Sessão expirada.'
-    };
-  }
-
-  if (
-    !title.trim() ||
-    !description.trim() ||
-    !category ||
-    !location.trim()
-  ) {
-    return {
-      ok: false,
-      msg: 'Preencha todos os campos obrigatórios.'
-    };
-  }
-
-  const denuncia = {
-    id: uid('d'),
-    title: title.trim(),
-    description: description.trim(),
-    category,
-    location: location.trim(),
-    latitude: latitude || null,
-    longitude: longitude || null,
-    media: media || null,
-    authorId: user.id,
-    authorName: user.name,
-    createdAt: nowISO(),
-    status: 'aberto',
-    validated: false,
-    removido: false,
-    confirmedResolved: false,
-    officialResponse: null,
-    likes: [],
-    comments: []
-  };
-
-  saveDenuncias([
-    denuncia,
-    ...getDenuncias()
-  ]);
-
-  return {
-    ok: true,
-    denuncia
-  };
-}
-
-
-function getDenunciaById(id) {
-  return getDenuncias().find(
-    denuncia => denuncia.id === id
-  ) || null;
-}
-
-
-function updateDenuncia(id, patch) {
-  const denuncias = getDenuncias();
-
-  const index = denuncias.findIndex(
-    denuncia => denuncia.id === id
-  );
-
-  if (index < 0) {
-    return {
-      ok: false
-    };
-  }
-
-  denuncias[index] = {
-    ...denuncias[index],
-    ...patch
-  };
-
-  saveDenuncias(denuncias);
-
-  return {
-    ok: true,
-    denuncia: denuncias[index]
-  };
-}
-
-
-function toggleLike(id) {
-  const user = currentUser();
-  const denuncia = getDenunciaById(id);
-
-  if (!user || !denuncia) return;
-
-  const index = denuncia.likes.indexOf(user.id);
-
-  if (index < 0) {
-    denuncia.likes.push(user.id);
-  } else {
-    denuncia.likes.splice(index, 1);
-  }
-
-  updateDenuncia(id, {
-    likes: denuncia.likes
-  });
-}
-
-
-function addComment(id, text, parentId) {
-  const user = currentUser();
-  const denuncia = getDenunciaById(id);
-
-  if (!user || !denuncia || !text.trim()) return;
-
-  const comment = {
-    id: uid('c'),
-    parentId: parentId || null,
-    authorId: user.id,
-    authorName: user.name,
-    text: text.trim(),
-    createdAt: nowISO()
-  };
-
-  denuncia.comments.push(comment);
-
-  updateDenuncia(id, {
-    comments: denuncia.comments
-  });
-
-  if (denuncia.authorId !== user.id) {
-    addNotification(
-      denuncia.authorId,
-      `${user.name} comentou na sua denúncia "${denuncia.title}".`,
-      id
-    );
+  if (!name || !email || !password) return validationError('Preencha todos os campos.');
+  if (password.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
+  if (!['admin', 'moderador', 'superadmin'].includes(role)) return validationError('Função inválida.');
+  try {
+    const { user } = await apiCreateUser({ name, email, password, role: toApiEnum(role) });
+    const normalized = normalizeUser(user);
+    usersCache = [normalized, ...usersCache.filter(item => item.id !== normalized.id)];
+    return { ok: true, user: normalized };
+  } catch (error) {
+    return validationError(error.message);
   }
 }
 
-
-function removeComment(denunciaId, commentId) {
-  const denuncia = getDenunciaById(denunciaId);
-
-  if (!denuncia) return;
-
-  const removed = new Set([commentId]);
-
-  let changed = true;
-
-  while (changed) {
-    changed = false;
-
-    denuncia.comments.forEach(comment => {
-      if (
-        removed.has(comment.parentId) &&
-        !removed.has(comment.id)
-      ) {
-        removed.add(comment.id);
-        changed = true;
-      }
-    });
+async function resetUserPassword(userId, newPassword) {
+  if (!newPassword || newPassword.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
+  try {
+    await apiResetUserPassword(userId, newPassword);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
   }
-
-  updateDenuncia(
-    denunciaId,
-    {
-      comments: denuncia.comments.filter(
-        comment => !removed.has(comment.id)
-      )
-    }
-  );
 }
 
-
-function moderateValidate(id) {
-  const denuncia = getDenunciaById(id);
-
-  const result = updateDenuncia(
-    id,
-    {
-      validated: true
-    }
-  );
-
-  if (denuncia) {
-    addNotification(
-      denuncia.authorId,
-      `Sua denúncia "${denuncia.title}" foi validada pela moderação.`,
-      id
-    );
+async function updateUserPhoto(userId, photoData) {
+  if (!signedInUser || signedInUser.id !== userId) return validationError('Sessão expirada.');
+  try {
+    const { user } = await apiUpdateMyPhoto(photoData);
+    signedInUser = normalizeUser(user);
+    usersCache = usersCache.map(item => item.id === userId ? signedInUser : item);
+    return { ok: true, user: signedInUser };
+  } catch (error) {
+    return validationError(error.message);
   }
-
-  return result;
 }
 
-
-function moderateRemove(id) {
-  const denuncia = getDenunciaById(id);
-
-  const result = updateDenuncia(
-    id,
-    {
-      removido: true
-    }
-  );
-
-  if (denuncia) {
-    addNotification(
-      denuncia.authorId,
-      `Sua denúncia "${denuncia.title}" foi removida pela moderação.`,
-      id
-    );
+async function createDenuncia({ title, description, category, location, latitude, longitude, media }) {
+  if (!signedInUser) return validationError('Sessão expirada.');
+  if (!title.trim() || !description.trim() || !category || !location.trim()) {
+    return validationError('Preencha todos os campos obrigatórios.');
   }
-
-  return result;
+  try {
+    const data = await apiCreateDenuncia({
+      title: title.trim(),
+      description: description.trim(),
+      category: toApiEnum(category),
+      location: location.trim(),
+      latitude,
+      longitude,
+    }, media);
+    const denuncia = normalizeDenuncia(data.denuncia);
+    denunciasCache.unshift(denuncia);
+    return { ok: true, denuncia };
+  } catch (error) {
+    return validationError(error.message);
+  }
 }
 
-
-function adminSetStatus(id, status) {
-  const denuncia = getDenunciaById(id);
-
-  const result = updateDenuncia(
-    id,
-    {
-      status
-    }
-  );
-
-  if (denuncia) {
-    addNotification(
-      denuncia.authorId,
-      `O status da denúncia "${denuncia.title}" foi atualizado.`,
-      id
-    );
+async function toggleLike(id) {
+  try {
+    await apiLikeDenuncia(id);
+    await refreshDenuncia(id);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
   }
-
-  return result;
 }
 
-
-function adminRespond(id, text) {
-  const user = currentUser();
-  const denuncia = getDenunciaById(id);
-
-  if (!user || !denuncia || !text.trim()) {
-    return {
-      ok: false
-    };
+async function addComment(id, text, parentId) {
+  if (!text.trim()) return validationError('Escreva um comentário.');
+  try {
+    await apiCreateComment(id, text.trim(), parentId);
+    await refreshDenuncia(id);
+    await refreshNotifications();
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
   }
-
-  const result = updateDenuncia(
-    id,
-    {
-      officialResponse: {
-        text: text.trim(),
-        authorName: user.name,
-        date: nowISO()
-      }
-    }
-  );
-
-  addNotification(
-    denuncia.authorId,
-    `Você recebeu uma resposta oficial na denúncia "${denuncia.title}".`,
-    id
-  );
-
-  return result;
 }
 
+async function removeComment(denunciaId, commentId) {
+  try {
+    await apiDeleteComment(denunciaId, commentId);
+    await refreshDenuncia(denunciaId);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
 
-function citizenConfirmResolved(id) {
-  return updateDenuncia(
-    id,
-    {
-      confirmedResolved: true
-    }
-  );
+async function moderateValidate(id) {
+  try {
+    await apiValidateDenuncia(id);
+    await Promise.all([refreshDenuncia(id), refreshNotifications()]);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function moderateRemove(id) {
+  try {
+    await apiRemoveDenuncia(id);
+    denunciasCache = denunciasCache.filter(item => item.id !== id);
+    await refreshNotifications();
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function adminSetStatus(id, status) {
+  try {
+    await apiSetDenunciaStatus(id, toApiEnum(status));
+    await Promise.all([refreshDenuncia(id), refreshNotifications()]);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function adminRespond(id, text) {
+  if (!text.trim()) return validationError('Escreva uma resposta antes de publicar.');
+  try {
+    await apiRespondToDenuncia(id, text.trim());
+    await Promise.all([refreshDenuncia(id), refreshNotifications()]);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function citizenConfirmResolved(id) {
+  try {
+    await apiConfirmResolved(id);
+    await refreshDenuncia(id);
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function markOneRead(id) {
+  try {
+    await apiMarkNotificationRead(id);
+    const notification = notificationsCache.find(item => item.id === id);
+    if (notification) notification.read = true;
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function markAllRead() {
+  try {
+    await apiMarkAllNotificationsRead();
+    notificationsCache.forEach(item => { item.read = true; });
+    return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
 }

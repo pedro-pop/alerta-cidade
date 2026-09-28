@@ -1,85 +1,65 @@
 # AlertaCidade — Front-end
 
-Interface web do sistema de denúncias urbanas colaborativas. HTML/CSS/JS
-puros (sem build, sem framework) — abra `index.html` num navegador ou sirva
-a pasta com qualquer servidor estático.
+Interface web de denúncias urbanas colaborativas em HTML/CSS/JS puro, sem
+build ou framework. O front-end usa a API REST Express em `../backend` para
+autenticação, usuários, denúncias, comentários, curtidas e notificações.
+A única informação de negócio guardada no `LocalStorage` são rascunhos de
+denúncia, isolados por usuário.
 
-> Hoje este front-end funciona de forma independente, usando o
-> `LocalStorage` do navegador para simular um backend (contas, denúncias,
-> notificações). A API real já está sendo construída em `../backend` — ver
-> o README da raiz do projeto para o estágio atual da integração entre os
-> dois.
-
-## Estrutura de pastas
+## Estrutura
 
 ```
 frontend/
-├── index.html          # esqueleto da página; importa os arquivos abaixo
-├── css/
-│   └── style.css        # design system: cores, tipografia, componentes, responsivo
+├── index.html
+├── css/style.css
 └── js/
-    ├── camera.js          # captura de câmera (getUserMedia/MediaRecorder) — não conhece o resto do app
-    ├── data.js              # "banco de dados": LocalStorage, autenticação, regras de negócio
-    └── ui.js                 # renderização das telas e todos os eventos de clique/input/submit
+    ├── api.js       # transporte REST, token Bearer e uploads multipart
+    ├── camera.js    # captura de foto/vídeo no dispositivo
+    ├── data.js      # adaptador entre modelos da API e modelos da interface
+    ├── map.js
+    └── ui.js        # renderização e eventos da interface
 ```
-
-A ordem de carregamento em `index.html` importa: `camera.js` e `data.js` não
-dependem um do outro, mas `ui.js` depende dos dois.
 
 ## Como rodar
 
-Não precisa de instalação nem build. Duas opções:
+Inicie o backend em `localhost:3333` (ver `../backend/README.md`) e sirva a
+pasta com qualquer servidor estático:
 
-- Abrir `index.html` diretamente no navegador; ou
-- Servir a pasta com qualquer servidor estático (recomendado, porque a
-  câmera — `getUserMedia` — exige um contexto seguro, e `file://` nem sempre
-  conta como tal dependendo do navegador):
+```bash
+npx serve frontend
+# ou
+python3 -m http.server 8080 --directory frontend
+```
 
-  ```bash
-  npx serve frontend
-  # ou
-  python3 -m http.server 8080 --directory frontend
-  ```
+Por padrão, as chamadas são feitas para `http://localhost:3333/api`. Para
+usar outra origem, defina `window.ALERTACIDADE_API_URL` antes de carregar
+`js/api.js` no `index.html`. Use uma conta criada na API; não há usuários
+de demonstração no navegador.
 
-## Contas de teste
+## Mapa
 
-Criadas automaticamente na primeira execução (ver `ensureSeedData()` em
-`js/data.js`):
-
-| Papel | E-mail | Senha |
-|---|---|---|
-| Super Admin | super@urbano.com | super123 |
-| Admin | admin@urbano.com | admin123 |
-| Moderador | moderadora@urbano.com | mod123 |
-| Cidadã | ana@mail.com | 123456 |
-| Cidadão | pedro@mail.com | 123456 |
+O seletor usa Leaflet com tiles do OpenStreetMap e não requer chave de API.
+Clique no mapa ou arraste o marcador para escolher o ponto; a busca reversa de
+endereço usa o serviço Nominatim do OpenStreetMap.
 
 ## Funcionalidades
 
-- **Autenticação** (LocalStorage): cadastro sempre cria conta CIDADAO; login valida e-mail/senha.
-- **4 papéis**: cidadão, moderador, admin, super admin — navegação e ações mudam conforme o papel.
-- **Denúncias**: título, descrição, categoria, localização, **foto ou vídeo** (upload de arquivo ou captura direta pela câmera do dispositivo), status, curtidas, comentários.
-- **Vídeo com limite de 3 minutos**: tanto gravando pela câmera (para automaticamente ao atingir o limite) quanto enviando um arquivo já existente (a duração é checada antes de aceitar).
-- **Comentários em thread**: é possível responder a um comentário específico, com indentação visual e remoção em cascata pela moderação.
-- **Notificações**: sino no topo com contador de não lidas; dispara quando alguém comenta/responde na sua denúncia, muda o status, valida, remove ou responde oficialmente.
-- **Rascunho de denúncia**: os campos do formulário de "Nova denúncia" são salvos automaticamente por até 30 minutos, mesmo se você sair da tela ou fechar o navegador.
-- **Foto de perfil**: qualquer usuário pode trocar a própria foto, escolhendo entre a galeria ou a câmera.
-- **Painel do super admin**: lista de usuários com filtro por papel e busca, criação de admin/moderador/super admin, redefinição de senha (a senha atual nunca é exibida).
-- **Responsivo**: navegação por barra superior no desktop, barra inferior fixa no mobile.
+- Cadastro e login; a sessão é restaurada via `/auth/me` usando token Bearer.
+- Papéis de cidadão, moderador, admin e super admin controlam a navegação e as ações.
+- Denúncias com foto ou vídeo, status, curtidas e comentários em thread.
+- Vídeos enviados ou gravados limitados a 3 minutos.
+- Notificações e painel administrativo de usuários.
+- Rascunho do formulário de denúncia salvo por usuário por até 30 minutos.
+- Foto de perfil via arquivo ou câmera.
+- Layout responsivo e mapa para selecionar a localização.
 
-## Decisões técnicas relevantes
+## Decisões técnicas
 
-- **Sem framework, sem build**: o app inteiro é renderizado via
-  `innerHTML` a partir do estado em `ui.js` (padrão "render function" bem
-  simples) com delegação de eventos em `document` — não há dependências
-  além do próprio navegador.
-- **`#modal-root` fica fora de `#app`** (ver `index.html`): um modal de
-  câmera aberto tem um `<video>` com um `MediaStream` ativo; se ele fosse
-  filho de `#app`, qualquer `render()` disparado por outro motivo (ex.: um
-  toast expirando) destruiria o elemento no meio de uma captura.
-- **Mídia é armazenada como base64 no LocalStorage** nesta fase (sem
-  backend real). Isso é adequado para fotos, mas vídeos podem esbarrar no
-  limite de armazenamento do navegador (tipicamente 5–10MB por origem) —
-  é uma limitação conhecida desta fase "só front-end", resolvida
-  naturalmente quando a integração com a API (`../backend`, que já salva
-  mídia em disco/arquivo) estiver pronta.
+- `api.js` cuida da comunicação HTTP, autorização e envio de arquivos
+  multipart. `data.js` normaliza enums e modelos da API para preservar a UI.
+- Dados de negócio não são mantidos localmente. Somente o token de sessão e
+  rascunhos de denúncia por usuário ficam no `LocalStorage`.
+- Fotos e vídeos selecionados ou capturados são enviados como arquivos
+  multipart; capturas geradas como data URL são convertidas para Blob/File.
+- `#modal-root` fica fora de `#app` para não interromper um stream de câmera
+  durante re-renderizações.

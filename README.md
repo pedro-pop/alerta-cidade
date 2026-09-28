@@ -22,11 +22,10 @@ rodar, decisões técnicas): [`frontend/README.md`](./frontend/README.md) e
 
 ## Estado atual do projeto
 
-**Front-end**: funcional e completo para as regras de negócio pedidas —
+**Front-end**: funcional para as regras de negócio pedidas —
 autenticação, os 4 papéis, denúncias com foto/vídeo (upload ou câmera),
 comentários em thread, notificações, rascunho de formulário, painel do
-super admin. Hoje ele roda **sozinho**, simulando o backend com o
-`LocalStorage` do navegador.
+super admin. Ele usa a API; o `LocalStorage` guarda apenas o token e rascunhos.
 
 **Backend**: a API está com a base pronta — banco de dados modelado
 (Prisma/PostgreSQL), autenticação por JWT, upload de mídia com validação de
@@ -34,19 +33,13 @@ tamanho e duração de vídeo, e um endpoint para cada ação que o front-end j�
 faz (criar/curtir/comentar/responder/etc.), com as mesmas regras de
 permissão por papel.
 
-**O que ainda falta**: ligar as duas pontas. Hoje o front-end conversa com
-`LocalStorage`, não com esta API — trocar isso é o próximo passo natural:
-substituir cada função de `frontend/js/data.js` por uma chamada `fetch` ao
-backend, guardar o token JWT (em vez do "usuário logado" salvo direto no
-LocalStorage) e tratar estados de carregamento/erro na interface. A
-arquitetura de ambos os lados já foi pensada para isso (mesmo modelo de
-dados, mesmos papéis, mesmas regras), então essa etapa é sobretudo
-mecânica, mas é grande o suficiente para valer seu próprio ciclo de
-implementação e testes.
+**Configuração inicial**: o Compose exige senha do banco e segredo JWT em um
+arquivo `.env`. O mapa usa OpenStreetMap e não exige chave de API.
 
 ## Como rodar tudo com Docker
 
 ```bash
+cp .env.example .env   # troque os valores de exemplo por segredos fortes
 docker compose up --build
 ```
 
