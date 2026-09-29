@@ -9,29 +9,62 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const already = await prisma.user.findFirst();
-  if (already) {
-    console.log('Já existem usuários no banco — seed ignorado.');
-    return;
-  }
-
   const hash = (pwd) => bcrypt.hash(pwd, 10);
 
-  const superadmin = await prisma.user.create({
-    data: { name: 'Super Admin', email: 'super@urbano.com', password: await hash('super123'), role: 'SUPERADMIN' },
-  });
-  const admin = await prisma.user.create({
-    data: { name: 'Carlos Mendes', email: 'admin@urbano.com', password: await hash('admin123'), role: 'ADMIN' },
-  });
-  await prisma.user.create({
-    data: { name: 'Fernanda Lima', email: 'moderadora@urbano.com', password: await hash('mod123'), role: 'MODERADOR' },
-  });
-  const ana = await prisma.user.create({
-    data: { name: 'Ana Souza', email: 'ana@mail.com', password: await hash('123456'), role: 'CIDADAO' },
-  });
-  const pedro = await prisma.user.create({
-    data: { name: 'Pedro Rocha', email: 'pedro@mail.com', password: await hash('123456'), role: 'CIDADAO' },
-  });
+  const createUserIfNotExists = async (name, email, password, role) => {
+    const existing = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existing) {
+      console.log(`Usuário ${email} já existe — ignorado.`);
+      return existing;
+    }
+
+    return prisma.user.create({
+      data: {
+        name,
+        email,
+        password: await hash(password),
+        role,
+      },
+    });
+  };
+
+  const superadmin = await createUserIfNotExists(
+    'Super Admin',
+    'super@urbano.com',
+    'super123',
+    'SUPERADMIN'
+  );
+
+  const admin = await createUserIfNotExists(
+    'Carlos Mendes',
+    'admin@urbano.com',
+    'admin123',
+    'ADMIN'
+  );
+
+  const moderadora = await createUserIfNotExists(
+    'Fernanda Lima',
+    'moderadora@urbano.com',
+    'mod123',
+    'MODERADOR'
+  );
+
+  const ana = await createUserIfNotExists(
+    'Ana Souza',
+    'ana@mail.com',
+    '123456',
+    'CIDADAO'
+  );
+
+  const pedro = await createUserIfNotExists(
+    'Pedro Rocha',
+    'pedro@mail.com',
+    '123456',
+    'CIDADAO'
+  );
 
   const d1 = await prisma.denuncia.create({
     data: {
