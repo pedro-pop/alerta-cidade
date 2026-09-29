@@ -22,7 +22,7 @@ router.get('/:id', optionalAuthenticate, validate(idParamSchema), denunciaContro
 router.post(
   '/',
   authenticate,
-  authorize('CIDADAO', 'SUPERADMIN'),
+  authorize('cidadao', 'SUPERADMIN'),
   denunciaMediaUpload.single('media'),
   validate(createDenunciaSchema),
   denunciaController.create

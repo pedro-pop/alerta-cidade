@@ -1,0 +1,25 @@
+[33mcommit 9f162fa70c876ba0481877045426964e4e39ac68[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Seu Nome <seu-email@exemplo.com>
+Date:   Sun Sep 27 22:19:10 2026 -0300
+
+    backend
+
+ .env.example                                  |   4 [32m+[m
+ .gitignore                                    |   3 [32m+[m
+ README.md                                     |  17 [32m+[m[31m-[m
+ backend/Dockerfile                            |   4 [32m+[m[31m-[m
+ backend/README.md                             |  23 [32m+[m[31m-[m
+ backend/package-lock.json                     | 146 [32m+++[m[31m-[m
+ backend/package.json                          |   3 [32m+[m[31m-[m
+ backend/prisma/schema.prisma                  |   2 [32m+[m
+ backend/src/controllers/denunciaController.js |  87 [32m++[m[31m-[m
+ backend/src/middlewares/validate.js           |   2 [32m+[m
+ backend/src/validators/denunciaValidators.js  |  11 [32m+[m[31m-[m
+ docker-compose.yml                            |  13 [32m+[m[31m-[m
+ frontend/README.md                            | 114 [32m++[m[31m-[m
+ frontend/css/style.css                        |   1 [32m+[m
+ frontend/js/api.js                            | 283 [32m++++[m[31m----[m
+ frontend/js/data.js                           | 958 [32m++++++++[m[31m------------------[m
+ frontend/js/map.js                            | 140 [32m++[m[31m--[m
+ frontend/js/ui.js                             | 215 [32m+++[m[31m---[m
+ 18 files changed, 877 insertions(+), 1149 deletions(-)

@@ -18,9 +18,13 @@ async function create(req, res) {
   }
 
   const comment = await prisma.comment.create({
-    data: { text, denunciaId, authorId: req.user.id, parentId: parentId || null },
-    include: { author: { select: { id: true, name: true, photoUrl: true } } },
-  });
+  data: {
+    content: text,
+    denuncia_id: denunciaId,
+    user_id: req.user.id,
+    parent_id: parentId || null,
+  },
+});
 
   // notifica o autor da denúncia sobre o comentário...
   await notifyUnlessSelf(denuncia.authorId, req.user.id, `${req.user.name} comentou na sua denúncia "${denuncia.title}".`, denunciaId);
