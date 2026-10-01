@@ -1,5 +1,5 @@
 # Imagem de produção da API do AlertaCidade.
-FROM node:20-alpine
+FROM node:22-alpine
 
 RUN apk add --no-cache openssl ffmpeg
 
@@ -19,5 +19,4 @@ RUN mkdir -p uploads/avatars uploads/denuncias
 
 EXPOSE 3333
 
-# sincroniza o schema disponível e só então sobe o servidor
-CMD ["sh", "-c", "npx prisma db push && node server.js"]
+CMD ["node", "server.js"]
