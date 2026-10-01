@@ -1,4 +1,4 @@
-const API_BASE_URL = window.ALERTACIDADE_API_URL || 'http://localhost:3333/api';
+const API_BASE_URL = window.ALERTACIDADE_API_URL || 'https://alerta-cidade-api.onrender.com/api';
 const API_ORIGIN = new URL(API_BASE_URL).origin;
 const TOKEN_KEY = 'ac_token';
 
@@ -39,7 +39,7 @@ async function apiFetch(endpoint, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers, body });
   } catch {
-    throw new Error('Não foi possível conectar à API. Verifique se o backend está ativo em localhost:3333.');
+    throw new Error('Não foi possível conectar à API. Verifique se o backend está disponível.');
   }
 
   const data = await response.json().catch(() => null);
