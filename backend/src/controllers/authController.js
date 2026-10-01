@@ -39,7 +39,7 @@ async function register(req, res) {
 
   res.status(201).json({
     token: data.session?.access_token || null,
-    user: sanitizeUser(user),
+    user: sanitizeUser(user, data.user.email),
   });
 }
 
@@ -65,7 +65,7 @@ async function login(req, res) {
 
   res.json({
     token: data.session.access_token,
-    user: sanitizeUser(user),
+    user: sanitizeUser(user, data.user.email),
   });
 }
 

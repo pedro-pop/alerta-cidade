@@ -1,7 +1,7 @@
 # AlertaCidade — Backend (API)
 
 API REST para o sistema de denúncias urbanas colaborativas. Node.js +
-Express, banco **PostgreSQL** via **Prisma ORM**, autenticação por **JWT**,
+Express, banco **PostgreSQL** via **Prisma ORM**, autenticação por **Supabase Auth**,
 upload de mídia (foto/vídeo) com **multer**.
 
 > Este backend é o começo da API "de verdade" para o projeto. O front-end
@@ -61,7 +61,7 @@ docker compose exec backend npm run seed
 
 ```bash
 cd backend
-cp .env.example .env        # ajuste DATABASE_URL e JWT_SECRET
+cp .env.example .env        # ajuste DATABASE_URL, Supabase e segredos do backend
 npm install
 npm run prisma:generate      # gera o client do Prisma a partir do schema
 npm run prisma:migrate        # cria as tabelas no banco (pede um nome para a migração)
@@ -73,15 +73,15 @@ A API sobe em `http://localhost:3333` (ou na porta definida em `PORT`).
 
 ## Autenticação
 
-Login e cadastro devolvem um `token` JWT. Rotas protegidas esperam:
+Cadastro e login são validados pelo Supabase Auth e devolvem um access token. Rotas protegidas esperam:
 
 ```
 Authorization: Bearer <token>
 ```
 
-O token carrega o `id` e o `role` do usuário; o middleware `authenticate`
-recarrega o usuário do banco a cada request (garante que uma conta
-desativada/alterada não continue "logada" indefinidamente).
+O backend valida o token com Supabase Auth e usa o `user.id` retornado para buscar o perfil correspondente. A autorização usa o `role` atual de `profiles`, não uma claim do JWT; alterações de papel passam a valer nas requisições seguintes.
+
+`SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` são usadas pelo backend para autenticação. `SUPABASE_SECRET_KEY` é necessária para criar contas administrativas e redefinir senhas. Configure-a somente no ambiente privado do backend local/deploy. Nunca a inclua no frontend, em respostas da API ou no Git. A promoção de papéis é protegida pelo backend e não depende dessa chave privilegiada.
 
 ## Referência da API
 
@@ -94,6 +94,7 @@ Base: `/api`
 | GET  | `/auth/me` | autenticado | Perfil do usuário logado |
 | GET  | `/users` | SUPERADMIN | Lista usuários — `?role=` e `?search=` |
 | POST | `/users` | SUPERADMIN | Cria ADMIN, MODERADOR ou SUPERADMIN |
+| PATCH | `/users/:id/role` | SUPERADMIN | Atualiza o papel de outro usuário |
 | PATCH | `/users/:id/password` | SUPERADMIN | Redefine a senha de um usuário |
 | PATCH | `/users/me/photo` | autenticado | Troca a própria foto (multipart, campo `photo`) |
 | GET  | `/denuncias` | público* | Lista — `?category=&status=&search=&sort=&page=&pageSize=` |

@@ -1,17 +1,15 @@
-const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const sanitizeUser = require('../utils/sanitizeUser');
 const { publicUrlFor } = require('../middlewares/upload');
-
-const SALT_ROUNDS = 10;
+const { getSupabaseAdmin } = require('../config/supabaseAdmin');
 
 // GET /api/users — apenas SUPERADMIN. Suporta ?role= e ?search= (nome ou id).
 async function listUsers(req, res) {
   const { role, search } = req.validated.query;
 
   const where = {
-    ...(role ? { role } : {}),
+    ...(role ? { role: { in: [role, role.toUpperCase()] } } : {}),
     ...(search
       ? {
           OR: [
@@ -22,7 +20,11 @@ async function listUsers(req, res) {
       : {}),
   };
 
-  const users = await prisma.user.findMany({ where, orderBy: { createdAt: 'desc' } });
+  const users = await prisma.user.findMany({
+    where,
+    orderBy: { created_at: 'desc' },
+    include: { authUser: { select: { email: true } } },
+  });
   res.json({ users: users.map(sanitizeUser) });
 }
 
@@ -31,13 +33,53 @@ async function listUsers(req, res) {
 async function createUser(req, res) {
   const { name, email, password, role } = req.validated.body;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) throw ApiError.conflict('Já existe uma conta com esse e-mail.');
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { name },
+  });
 
-  const hash = await bcrypt.hash(password, SALT_ROUNDS);
-  const user = await prisma.user.create({ data: { name, email, password: hash, role } });
+  if (error || !data.user) {
+    if (error?.code === 'user_already_exists') {
+      throw ApiError.conflict('Já existe uma conta com esse e-mail.');
+    }
+    throw ApiError.badRequest(error?.message || 'Não foi possível criar a conta.');
+  }
 
-  res.status(201).json({ user: sanitizeUser(user) });
+  try {
+    const user = await prisma.user.upsert({
+      where: { id: data.user.id },
+      update: { name, role },
+      create: { id: data.user.id, name, role },
+    });
+    res.status(201).json({ user: sanitizeUser(user, data.user.email) });
+  } catch (error) {
+    await supabaseAdmin.auth.admin.deleteUser(data.user.id).catch(() => {});
+    throw error;
+  }
+}
+
+// PATCH /api/users/:id/role — apenas SUPERADMIN.
+async function updateUserRole(req, res) {
+  const { id } = req.validated.params;
+  const { role } = req.validated.body;
+
+  if (id === req.user.id) {
+    throw ApiError.badRequest('Não é possível alterar o próprio papel.');
+  }
+
+  const existing = await prisma.user.findUnique({ where: { id } });
+  if (!existing) throw ApiError.notFound('Usuário não encontrado.');
+
+  const user = await prisma.user.update({
+    where: { id },
+    data: { role },
+    include: { authUser: { select: { email: true } } },
+  });
+
+  res.json({ user: sanitizeUser(user) });
 }
 
 // PATCH /api/users/:id/password — apenas SUPERADMIN.
@@ -49,8 +91,8 @@ async function resetPassword(req, res) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw ApiError.notFound('Usuário não encontrado.');
 
-  const hash = await bcrypt.hash(password, SALT_ROUNDS);
-  await prisma.user.update({ where: { id }, data: { password: hash } });
+  const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, { password });
+  if (error) throw ApiError.badRequest(error.message);
 
   res.json({ ok: true });
 }
@@ -63,9 +105,9 @@ async function updateMyPhoto(req, res) {
   if (!req.file) throw ApiError.badRequest('Envie um arquivo de imagem no campo "photo".');
 
   const photoUrl = publicUrlFor(req.file);
-  const user = await prisma.user.update({ where: { id: req.user.id }, data: { photoUrl } });
+  const user = await prisma.user.update({ where: { id: req.user.id }, data: { photo_url: photoUrl } });
 
-  res.json({ user: sanitizeUser(user) });
+  res.json({ user: sanitizeUser(user, req.user.email) });
 }
 
-module.exports = { listUsers, createUser, resetPassword, updateMyPhoto };
+module.exports = { listUsers, createUser, updateUserRole, resetPassword, updateMyPhoto };

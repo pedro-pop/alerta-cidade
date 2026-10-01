@@ -2,11 +2,16 @@
 // montar uma resposta contendo um usuário (perfil próprio, item de uma lista
 // de usuários, autor de uma denúncia, etc.), passa por aqui antes.
 
-function sanitizeUser(user) {
+function sanitizeUser(user, email) {
   if (!user) return null;
-  const safe = { ...user };
-  delete safe.password;
-  return safe;
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    email: email || user.authUser?.email || user.email || null,
+    photoUrl: user.photo_url || user.photoUrl || null,
+    createdAt: user.created_at || user.createdAt || null,
+  };
 }
 
 module.exports = sanitizeUser;

@@ -60,19 +60,27 @@ function toApiEnum(value) {
 function normalizeUser(user) {
   if (!user) return null;
   const role = toUiEnum(user.role);
-  return { ...user, role, photo: user.photoUrl || user.photo || null, photoUrl: user.photoUrl || user.photo || null };
+  const photo = apiAssetUrl(user.photoUrl || user.photo_url || user.photo || null);
+  return {
+    ...user,
+    role,
+    email: user.email || user.authUser?.email || '',
+    createdAt: user.createdAt || user.created_at || null,
+    photo,
+    photoUrl: photo,
+  };
 }
 
 function normalizeComment(comment) {
-  const author = comment.author || {};
+  const author = comment.author || comment.profiles || {};
   return {
     id: comment.id,
-    parentId: comment.parentId || null,
-    authorId: comment.authorId || author.id,
+    parentId: comment.parentId || comment.parent_id || null,
+    authorId: comment.authorId || comment.user_id || author.id,
     authorName: comment.authorName || author.name || 'Usuário',
-    authorPhoto: author.photoUrl || null,
-    text: comment.text,
-    createdAt: comment.createdAt,
+    authorPhoto: apiAssetUrl(author.photoUrl || author.photo_url || null),
+    text: comment.text || comment.content || '',
+    createdAt: comment.createdAt || comment.created_at,
   };
 }
 
@@ -99,7 +107,7 @@ function normalizeDenuncia(raw, comments) {
     createdAt: raw.createdAt,
     authorId: raw.authorId || author.id,
     authorName: author.name || raw.authorName || 'Usuário',
-    authorPhoto: author.photoUrl || null,
+    authorPhoto: apiAssetUrl(author.photoUrl || author.photo_url || null),
     media: media ? {
       ...media,
       type: toUiEnum(media.type),
@@ -169,7 +177,9 @@ async function refreshNotifications() {
   const data = await apiGetNotifications();
   notificationsCache = (data.notifications || []).map(item => ({
     ...item,
-    denunciaId: item.denunciaId || '',
+    userId: item.userId || item.user_id,
+    denunciaId: item.denunciaId || item.denuncia_id || '',
+    createdAt: item.createdAt || item.created_at,
   }));
   return notificationsCache;
 }
@@ -299,6 +309,20 @@ async function resetUserPassword(userId, newPassword) {
   try {
     await apiResetUserPassword(userId, newPassword);
     return { ok: true };
+  } catch (error) {
+    return validationError(error.message);
+  }
+}
+
+async function updateUserRole(userId, role) {
+  if (!['cidadao', 'moderador', 'admin', 'superadmin'].includes(role)) {
+    return validationError('Função inválida.');
+  }
+  try {
+    const { user } = await apiUpdateUserRole(userId, toApiEnum(role));
+    const normalized = normalizeUser(user);
+    usersCache = usersCache.map(item => item.id === userId ? normalized : item);
+    return { ok: true, user: normalized };
   } catch (error) {
     return validationError(error.message);
   }

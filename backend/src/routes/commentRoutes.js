@@ -9,6 +9,6 @@ const { createCommentSchema, commentIdParamSchema } = require('../validators/com
 const router = Router({ mergeParams: true });
 
 router.post('/', authenticate, validate(createCommentSchema), commentController.create);
-router.delete('/:commentId', authenticate, authorize('MODERADOR', 'SUPERADMIN'), validate(commentIdParamSchema), commentController.remove);
+router.delete('/:commentId', authenticate, authorize('moderador', 'superadmin'), validate(commentIdParamSchema), commentController.remove);
 
 module.exports = router;

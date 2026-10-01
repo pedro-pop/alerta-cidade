@@ -98,7 +98,7 @@ function avatarHTML(userId, fallbackName, sizeClass, providedPhoto) {
   const name = u ? u.name : (fallbackName || '?');
   const cls = 'avatar' + (sizeClass ? ' ' + sizeClass : '');
   const photoUrl = providedPhoto || (u && (u.photo || u.photoUrl)) || null;
-  if (photoUrl) return `<img src="${photoUrl}" class="${cls} avatar-img" alt="${escapeHTML(name)}">`;
+  if (photoUrl) return `<img src="${escapeHTML(photoUrl)}" class="${cls} avatar-img" alt="${escapeHTML(name)}">`;
   return `<span class="${cls}">${initials(name)}</span>`;
 }
 
@@ -752,7 +752,11 @@ function adminScreen() {
           <tr>
             <td class="user-cell">${avatarHTML(u.id, u.name, 'small')}<div><b>${escapeHTML(u.name)}</b><small>${escapeHTML(u.email)}</small></div></td>
             <td><code>${u.id}</code></td>
-            <td><span class="pill ${u.role === 'superadmin' ? 'pill-black' : 'pill-green'}">${ROLE_LABELS[u.role]}</span></td>
+            <td>
+              <select data-action="admin-user-role" data-id="${u.id}" data-current-role="${u.role}" aria-label="Função de ${escapeHTML(u.name)}" ${u.id === currentUser()?.id ? 'disabled' : ''}>
+                ${Object.entries(ROLE_LABELS).map(([role, label]) => `<option value="${role}" ${u.role === role ? 'selected' : ''}>${label}</option>`).join('')}
+              </select>
+            </td>
             <td>${formatDate(u.createdAt)}</td>
             <td><button class="btn btn-outline btn-sm" data-action="open-reset-password" data-id="${u.id}">${ICONS.key} Redefinir senha</button></td>
           </tr>
@@ -1259,8 +1263,20 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-document.addEventListener('change', (e) => {
+document.addEventListener('change', async (e) => {
   if (!e.target.dataset) return;
+
+  if (e.target.dataset.action === 'admin-user-role') {
+    const result = await updateUserRole(e.target.dataset.id, e.target.value);
+    if (!result.ok) {
+      e.target.value = e.target.dataset.currentRole;
+      showToast(result.msg, 'error');
+      return;
+    }
+    e.target.dataset.currentRole = result.user.role;
+    render();
+    showToast('Função atualizada.', 'success');
+  }
 
   if (e.target.dataset.action === 'filter-category') {
     state.filters.category = e.target.value;

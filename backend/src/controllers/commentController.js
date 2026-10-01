@@ -8,32 +8,32 @@ async function create(req, res) {
   const { text, parentId } = req.validated.body;
 
   const denuncia = await prisma.denuncia.findUnique({ where: { id: denunciaId } });
-  if (!denuncia || denuncia.removed) throw ApiError.notFound('Denúncia não encontrada.');
+  if (!denuncia || denuncia.removido) throw ApiError.notFound('Denúncia não encontrada.');
 
   if (parentId) {
     const parent = await prisma.comment.findUnique({ where: { id: parentId } });
-    if (!parent || parent.denunciaId !== denunciaId) {
+    if (!parent || parent.denuncia_id !== denunciaId) {
       throw ApiError.badRequest('Comentário-pai inválido para esta denúncia.');
     }
   }
 
   const comment = await prisma.comment.create({
-  data: {
-    content: text,
-    denuncia_id: denunciaId,
-    user_id: req.user.id,
-    parent_id: parentId || null,
-  },
-});
+    data: {
+      content: text,
+      denuncia_id: denunciaId,
+      user_id: req.user.id,
+      parent_id: parentId || null,
+    },
+  });
 
   // notifica o autor da denúncia sobre o comentário...
-  await notifyUnlessSelf(denuncia.authorId, req.user.id, `${req.user.name} comentou na sua denúncia "${denuncia.title}".`, denunciaId);
+  await notifyUnlessSelf(denuncia.user_id, req.user.id, `${req.user.name} comentou na sua denúncia "${denuncia.title}".`, denunciaId);
 
   // ...e, se for uma resposta, notifica também o autor do comentário-pai (evitando duplicar se for a mesma pessoa)
   if (parentId) {
     const parent = await prisma.comment.findUnique({ where: { id: parentId } });
-    if (parent && parent.authorId !== denuncia.authorId) {
-      await notifyUnlessSelf(parent.authorId, req.user.id, `${req.user.name} respondeu ao seu comentário em "${denuncia.title}".`, denunciaId);
+    if (parent && parent.user_id !== denuncia.user_id) {
+      await notifyUnlessSelf(parent.user_id, req.user.id, `${req.user.name} respondeu ao seu comentário em "${denuncia.title}".`, denunciaId);
     }
   }
 
@@ -46,7 +46,7 @@ async function remove(req, res) {
   const { id: denunciaId, commentId } = req.validated.params;
 
   const comment = await prisma.comment.findUnique({ where: { id: commentId } });
-  if (!comment || comment.denunciaId !== denunciaId) throw ApiError.notFound('Comentário não encontrado.');
+  if (!comment || comment.denuncia_id !== denunciaId) throw ApiError.notFound('Comentário não encontrado.');
 
   await prisma.comment.delete({ where: { id: commentId } });
   res.json({ ok: true });

@@ -1,6 +1,9 @@
 const { z } = require('zod');
 
 const ADMIN_CREATABLE_ROLES = ['ADMIN', 'MODERADOR', 'SUPERADMIN'];
+const USER_ROLES = ['CIDADAO', 'MODERADOR', 'ADMIN', 'SUPERADMIN'];
+const ROLE_VALUES = [...USER_ROLES, ...USER_ROLES.map(role => role.toLowerCase())];
+const userRoleSchema = z.enum(ROLE_VALUES).transform(role => role.toLowerCase());
 
 const createUserSchema = z.object({
   body: z.object({
@@ -9,8 +12,13 @@ const createUserSchema = z.object({
     password: z.string().min(4).max(72),
     role: z.enum(ADMIN_CREATABLE_ROLES, {
       errorMap: () => ({ message: `Função deve ser uma de: ${ADMIN_CREATABLE_ROLES.join(', ')}.` }),
-    }),
+    }).transform(role => role.toLowerCase()),
   }),
+});
+
+const updateUserRoleSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({ role: userRoleSchema }),
 });
 
 const resetPasswordSchema = z.object({
@@ -20,7 +28,7 @@ const resetPasswordSchema = z.object({
 
 const listUsersQuerySchema = z.object({
   query: z.object({
-    role: z.enum(['CIDADAO', 'MODERADOR', 'ADMIN', 'SUPERADMIN']).optional(),
+    role: userRoleSchema.optional(),
     search: z.string().trim().max(160).optional(),
   }),
 });
@@ -29,4 +37,4 @@ const idParamSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
 });
 
-module.exports = { createUserSchema, resetPasswordSchema, listUsersQuerySchema, idParamSchema, ADMIN_CREATABLE_ROLES };
+module.exports = { createUserSchema, resetPasswordSchema, updateUserRoleSchema, listUsersQuerySchema, idParamSchema, ADMIN_CREATABLE_ROLES };

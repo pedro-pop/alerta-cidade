@@ -8,7 +8,11 @@ const prisma = require('../config/prisma');
 async function notify(userId, message, denunciaId) {
   if (!userId) return;
   await prisma.notification.create({
-    data: { userId, message, denunciaId: denunciaId || null },
+    data: {
+      user_id: userId,
+      message,
+      denuncia_id: denunciaId || null,
+    },
   });
 }
 

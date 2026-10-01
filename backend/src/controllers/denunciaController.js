@@ -31,12 +31,23 @@ const denunciaListSelect = {
   created_at: true,
   updated_at: true,
   user_id: true,
+  official_response: true,
+  official_response_at: true,
+  official_response_by: true,
+  official_response_author: true,
+  official_response_date: true,
 
   profiles_denuncias_user_idToprofiles: {
     select: {
       id: true,
       name: true,
       photo_url: true,
+    },
+  },
+
+  profiles_denuncias_official_response_byToprofiles: {
+    select: {
+      name: true,
     },
   },
 
@@ -51,6 +62,11 @@ const denunciaListSelect = {
 };
 
 function serializeDenuncia(d, likedByMe) {
+  const mediaRow = Array.isArray(d.denuncia_media)
+    ? d.denuncia_media[0]
+    : d.denuncia_media;
+  const mediaPath = mediaRow?.storage_path;
+
   return {
     id: d.id,
     title: d.title,
@@ -74,8 +90,24 @@ function serializeDenuncia(d, likedByMe) {
         }
       : null,
 
-    media: d.denuncia_media || null,
-    officialResponse: d.official_response || null,
+    media: mediaRow
+      ? {
+          id: mediaRow.id,
+          type: mediaRow.media_type,
+          url: mediaPath?.startsWith('http') || mediaPath?.startsWith('/uploads/')
+            ? mediaPath
+            : publicUrlFor({ path: mediaPath }),
+        }
+      : null,
+    officialResponse: d.official_response
+      ? {
+          text: d.official_response,
+          authorName: d.official_response_author
+            || d.profiles_denuncias_official_response_byToprofiles?.name
+            || 'Equipe responsável',
+          date: d.official_response_date || d.official_response_at,
+        }
+      : null,
 
     commentsCount: d._count ? d._count.comments : 0,
     likesCount: d._count ? d._count.likes : 0,
@@ -222,7 +254,15 @@ async function getById(req, res) {
 
   res.json({
     denuncia: serializeDenuncia(d, likedByMe),
-    comments,
+    comments: comments.map((comment) => ({
+      id: comment.id,
+      parentId: comment.parent_id,
+      authorId: comment.user_id,
+      authorName: comment.profiles?.name || 'Usuário',
+      authorPhoto: comment.profiles?.photo_url || null,
+      text: comment.content,
+      createdAt: comment.created_at,
+    })),
   });
 }
 
@@ -487,18 +527,14 @@ async function respond(req, res) {
     throw ApiError.notFound('Denúncia não encontrada.');
   }
 
-  const officialResponse = await prisma.officialResponse.upsert({
-    where: {
-      denuncia_id: id,
-    },
-    update: {
-      text,
-      author_id: req.user.id,
-    },
-    create: {
-      text,
-      author_id: req.user.id,
-      denuncia_id: id,
+  const updated = await prisma.denuncia.update({
+    where: { id },
+    data: {
+      official_response: text,
+      official_response_by: req.user.id,
+      official_response_author: req.user.name,
+      official_response_at: new Date(),
+      official_response_date: new Date(),
     },
   });
 
@@ -509,7 +545,13 @@ async function respond(req, res) {
     id
   );
 
-  res.json({ officialResponse });
+  res.json({
+    officialResponse: {
+      text: updated.official_response,
+      authorName: updated.official_response_author,
+      date: updated.official_response_date || updated.official_response_at,
+    },
+  });
 }
 
 // POST /api/denuncias/:id/confirm-resolved

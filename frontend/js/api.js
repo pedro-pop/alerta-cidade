@@ -145,6 +145,10 @@ async function apiCreateUser(user) {
   return apiFetch('/users', { method: 'POST', body: user });
 }
 
+async function apiUpdateUserRole(id, role) {
+  return apiFetch(`/users/${encodeURIComponent(id)}/role`, { method: 'PATCH', body: { role } });
+}
+
 async function apiResetUserPassword(id, password) {
   return apiFetch(`/users/${encodeURIComponent(id)}/password`, { method: 'PATCH', body: { password } });
 }

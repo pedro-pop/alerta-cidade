@@ -22,7 +22,7 @@ router.get('/:id', optionalAuthenticate, validate(idParamSchema), denunciaContro
 router.post(
   '/',
   authenticate,
-  authorize('cidadao', 'SUPERADMIN'),
+  authorize('cidadao', 'superadmin'),
   denunciaMediaUpload.single('media'),
   validate(createDenunciaSchema),
   denunciaController.create
@@ -31,11 +31,11 @@ router.post(
 router.post('/:id/like', authenticate, validate(idParamSchema), denunciaController.toggleLike);
 router.post('/:id/confirm-resolved', authenticate, validate(idParamSchema), denunciaController.confirmResolved);
 
-router.post('/:id/validate', authenticate, authorize('MODERADOR', 'SUPERADMIN'), validate(idParamSchema), denunciaController.moderateValidate);
-router.post('/:id/remove', authenticate, authorize('MODERADOR', 'SUPERADMIN'), validate(idParamSchema), denunciaController.moderateRemove);
+router.post('/:id/validate', authenticate, authorize('moderador', 'superadmin'), validate(idParamSchema), denunciaController.moderateValidate);
+router.post('/:id/remove', authenticate, authorize('moderador', 'superadmin'), validate(idParamSchema), denunciaController.moderateRemove);
 
-router.patch('/:id/status', authenticate, authorize('ADMIN', 'SUPERADMIN'), validate(updateStatusSchema), denunciaController.setStatus);
-router.post('/:id/respond', authenticate, authorize('ADMIN', 'SUPERADMIN'), validate(respondSchema), denunciaController.respond);
+router.patch('/:id/status', authenticate, authorize('admin', 'superadmin'), validate(updateStatusSchema), denunciaController.setStatus);
+router.post('/:id/respond', authenticate, authorize('admin', 'superadmin'), validate(respondSchema), denunciaController.respond);
 
 router.use('/:id/comments', commentRoutes);
 

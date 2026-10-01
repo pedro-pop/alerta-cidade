@@ -2,6 +2,10 @@ const supabase = require('../config/supabase');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 
+function normalizeRole(role) {
+  return String(role || '').trim().toLowerCase();
+}
+
 async function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
@@ -33,7 +37,7 @@ async function authenticate(req, res, next) {
     id: profile.id,
     name: profile.name,
     email: user.email,
-    role: profile.role,
+    role: normalizeRole(profile.role),
     photoUrl: profile.photo_url,
   };
 
@@ -46,9 +50,11 @@ function authorize(...allowedRoles) {
       throw ApiError.unauthorized();
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const currentRole = normalizeRole(req.user.role);
+    const permittedRoles = allowedRoles.map(normalizeRole);
+    if (!permittedRoles.includes(currentRole)) {
       throw ApiError.forbidden(
-        `Esta ação exige um dos papéis: ${allowedRoles.join(', ')}.`
+        `Esta ação exige um dos papéis: ${permittedRoles.join(', ')}.`
       );
     }
 
@@ -80,7 +86,7 @@ async function optionalAuthenticate(req, res, next) {
           id: profile.id,
           name: profile.name,
           email: user.email,
-          role: profile.role,
+          role: normalizeRole(profile.role),
           photoUrl: profile.photo_url,
         };
       }
