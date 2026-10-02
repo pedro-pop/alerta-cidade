@@ -138,11 +138,12 @@ responder o erro — não fica lixo em `uploads/`.
 - **Validação de duração usa `ffprobe`**, incluído na imagem Docker via
   `ffmpeg`. Se a duração não puder ser verificada, a API rejeita o vídeo em
   vez de confiar apenas na validação do navegador.
-- **Armazenamento de mídia é local (disco)**. Funciona bem para um único
-  servidor; para múltiplas instâncias/escala horizontal, o próximo passo
-  natural é trocar `src/middlewares/upload.js` por um adapter para um object
-  storage (S3, R2, GCS etc.) — a função `publicUrlFor` é o único lugar que
-  precisaria mudar.
+- **Armazenamento de mídia é local (disco)**. Em Render, anexe um Persistent
+  Disk com mount path `/var/data` e configure `UPLOAD_DIR=/var/data/uploads`
+  no serviço do backend. Isso mantém fotos de perfil e mídias de denúncias
+  entre reinícios e deploys. Sem disco persistente, o filesystem do serviço é
+  efêmero e os arquivos desaparecem. Um único disco também não é compartilhado
+  entre múltiplas instâncias; para escala horizontal, use object storage.
 - **Rate limiting e refresh token** ainda não implementados — o token JWT
   atual expira (`JWT_EXPIRES_IN`) e exige novo login; não há um endpoint de
   refresh nem proteção explícita contra força bruta no login. Recomendado

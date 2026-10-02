@@ -13,29 +13,51 @@ const Camera = (() => {
   let chunks = [];
   let timerInterval = null;
   let recordSeconds = 0;
+  let activeVideoEl = null;
+  let streamRequestId = 0;
 
   function isSupported() {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   }
 
-  async function start(videoEl, facingMode) {
+  async function start(videoEl, facingMode, withAudio) {
     stop();
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facingMode || 'user' },
-      audio: true,
+    const requestId = ++streamRequestId;
+    const nextStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact: facingMode || 'user' } },
+      audio: !!withAudio,
     });
-    videoEl.srcObject = stream;
-    await videoEl.play().catch(() => {});
+    if (requestId !== streamRequestId) {
+      nextStream.getTracks().forEach(track => track.stop());
+      return false;
+    }
+    stream = nextStream;
+    activeVideoEl = videoEl;
+    videoEl.srcObject = nextStream;
+    try {
+      await videoEl.play();
+    } catch (error) {
+      stop();
+      throw error;
+    }
+    return true;
   }
 
   function stop() {
+    streamRequestId += 1;
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try { mediaRecorder.stop(); } catch (e) { /* já parado */ }
     }
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
+    const currentStream = stream;
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
       stream = null;
+    }
+    if (activeVideoEl) {
+      activeVideoEl.pause();
+      if (activeVideoEl.srcObject === currentStream) activeVideoEl.srcObject = null;
+      activeVideoEl = null;
     }
     mediaRecorder = null;
     chunks = [];
@@ -43,9 +65,12 @@ const Camera = (() => {
   }
 
   function capturePhoto(videoEl) {
+    if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth || !videoEl.videoHeight) {
+      throw new Error('A câmera ainda não está pronta para capturar.');
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth || 640;
-    canvas.height = videoEl.videoHeight || 480;
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
     canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.85);
   }

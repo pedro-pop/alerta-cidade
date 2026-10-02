@@ -13,7 +13,9 @@ const multer = require('multer');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 
-const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads');
+const UPLOAD_ROOT = path.resolve(
+  process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads')
+);
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

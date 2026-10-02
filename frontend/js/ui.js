@@ -11,6 +11,7 @@ const state = {
   selectedId: null,
   filters: { category: 'all', status: 'all', sort: 'recent', search: '' },
   adminFilters: { role: 'all', search: '' },
+  pendingProfilePhoto: null,
   pendingMedia: null,      // { type: 'photo'|'video', url, durationSeconds } — mídia da denúncia em edição
   draft: null,             // rascunho da denúncia (persistido em LocalStorage)
   replyingTo: null,        // id do comentário sendo respondido
@@ -19,6 +20,8 @@ const state = {
   // estado transitório do modal de câmera
   cameraAllowVideo: false,
   cameraMode: 'photo',
+  cameraFacingMode: 'user',
+  cameraSwitching: false,
   cameraRecording: false,
   cameraOnDone: null,
   sourceCallbacks: null,
@@ -689,6 +692,16 @@ function profileScreen(user) {
       </div>
     </div>
 
+    ${state.pendingProfilePhoto ? `
+      <div class="profile-photo-review card">
+        <img src="${escapeHTML(state.pendingProfilePhoto)}" alt="Prévia da nova foto de perfil">
+        <div>
+          <p>Confirme a foto capturada para salvar no perfil.</p>
+          <button type="button" class="btn btn-primary btn-sm" data-action="save-profile-photo">Salvar foto</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="discard-profile-photo">Descartar</button>
+        </div>
+      </div>` : ''}
+
     <h3 class="section-title">Minhas denúncias (${mine.length})</h3>
     ${mine.length === 0 ? emptyState('Você ainda não criou denúncias', 'Registre um problema urbano para começar a acompanhar aqui.') : `
       <div class="list-simple">
@@ -845,13 +858,22 @@ function openCameraCapture({ allowVideo, title, onDone }) {
   }
   state.cameraAllowVideo = !!allowVideo;
   state.cameraMode = 'photo';
+  state.cameraFacingMode = 'user';
+  state.cameraSwitching = true;
   state.cameraRecording = false;
   state.cameraOnDone = onDone;
 
   document.getElementById('modal-root').innerHTML = cameraModalHTML(title);
 
   const videoEl = document.getElementById('camera-preview');
-  Camera.start(videoEl).catch(() => {
+  Camera.start(videoEl, state.cameraFacingMode, state.cameraAllowVideo).then((started) => {
+    if (!started) return;
+    state.cameraSwitching = false;
+    updateCameraModeUI();
+  }).catch(() => {
+    Camera.stop();
+    state.cameraSwitching = false;
+    state.cameraOnDone = null;
     showToast('Não foi possível acessar a câmera. Verifique as permissões do navegador.', 'error');
     closeModal();
   });
@@ -866,7 +888,7 @@ function cameraModalHTML(title) {
         <button class="icon-btn" data-action="camera-cancel">${ICONS.close}</button>
       </div>
       <div class="camera-preview-wrap">
-        <video id="camera-preview" autoplay playsinline muted></video>
+        <video id="camera-preview" class="${state.cameraFacingMode === 'user' ? 'front-camera' : ''}" autoplay playsinline muted></video>
         <div id="camera-rec-badge" class="camera-rec-badge" hidden>
           <span class="dot"></span><span id="camera-timer">00:00</span> / ${formatMMSS(Camera.MAX_VIDEO_SECONDS)}
         </div>
@@ -884,18 +906,52 @@ function cameraModalHTML(title) {
 }
 
 function cameraActionButtonsHTML() {
+  const switchButton = `<button type="button" class="btn btn-outline" data-action="camera-switch" ${state.cameraSwitching || state.cameraRecording ? 'disabled' : ''}>Câmera ${state.cameraFacingMode === 'user' ? 'traseira' : 'frontal'}</button>`;
   if (state.cameraAllowVideo && state.cameraMode === 'video') {
-    return `<button type="button" class="btn ${state.cameraRecording ? 'btn-danger-outline' : 'btn-primary'} btn-block" data-action="camera-record-toggle">
+    return `${switchButton}<button type="button" class="btn ${state.cameraRecording ? 'btn-danger-outline' : 'btn-primary'}" data-action="camera-record-toggle">
       ${state.cameraRecording ? ICONS.check + ' Parar e usar vídeo' : ICONS.video + ' Iniciar gravação'}
     </button>`;
   }
-  return `<button type="button" class="btn btn-primary btn-block" data-action="camera-capture-photo">${ICONS.camera} Capturar foto</button>`;
+  return `${switchButton}<button type="button" class="btn btn-primary" data-action="camera-capture-photo">${ICONS.camera} Capturar foto</button>`;
 }
 
 function updateCameraModeUI() {
   document.querySelectorAll('.camera-mode-toggle button').forEach(b => b.classList.toggle('active', b.dataset.mode === state.cameraMode));
+  const video = document.getElementById('camera-preview');
+  if (video) video.classList.toggle('front-camera', state.cameraFacingMode === 'user');
   const actions = document.getElementById('camera-actions');
   if (actions) actions.innerHTML = cameraActionButtonsHTML();
+}
+
+async function switchCamera() {
+  if (state.cameraSwitching || state.cameraRecording) return;
+  const video = document.getElementById('camera-preview');
+  if (!video) return;
+
+  const previousFacingMode = state.cameraFacingMode;
+  const nextFacingMode = previousFacingMode === 'user' ? 'environment' : 'user';
+  state.cameraSwitching = true;
+  updateCameraModeUI();
+
+  try {
+    const started = await Camera.start(video, nextFacingMode, state.cameraAllowVideo);
+    if (!started) return;
+    state.cameraFacingMode = nextFacingMode;
+  } catch {
+    try {
+      const restored = await Camera.start(video, previousFacingMode, state.cameraAllowVideo);
+      if (!restored) return;
+      showToast('A outra câmera não está disponível neste dispositivo.', 'error');
+    } catch {
+      Camera.stop();
+      state.cameraOnDone = null;
+      closeModal();
+      showToast('Não foi possível reabrir a câmera.', 'error');
+    }
+  } finally {
+    state.cameraSwitching = false;
+    updateCameraModeUI();
+  }
 }
 
 function handleRecordToggle() {
@@ -1213,14 +1269,10 @@ document.addEventListener('click', async (e) => {
         onCamera: () => openCameraCapture({
           allowVideo: false,
           title: 'Tirar foto de perfil',
-          onDone: async (res) => {
-            const user = currentUser();
-            if (user) {
-              const result = await updateUserPhoto(user.id, res.dataUrl);
-              if (!result.ok) return showToast(result.msg, 'error');
-            }
+          onDone: (res) => {
+            state.pendingProfilePhoto = res.dataUrl;
             render();
-            showToast('Foto de perfil atualizada!', 'success');
+            showToast('Foto capturada. Confirme para salvar.', 'success');
           },
         }),
       });
@@ -1247,12 +1299,36 @@ document.addEventListener('click', async (e) => {
       updateCameraModeUI();
       break;
 
+    case 'camera-switch':
+      await switchCamera();
+      break;
+
     case 'camera-capture-photo': {
       const videoEl = document.getElementById('camera-preview');
-      const dataUrl = Camera.capturePhoto(videoEl);
-      finalizeCameraCapture({ type: 'photo', dataUrl });
+      try {
+        const dataUrl = Camera.capturePhoto(videoEl);
+        finalizeCameraCapture({ type: 'photo', dataUrl });
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
       break;
     }
+
+    case 'save-profile-photo': {
+      const user = currentUser();
+      if (!user || !state.pendingProfilePhoto) return;
+      const result = await updateUserPhoto(user.id, state.pendingProfilePhoto);
+      if (!result.ok) return showToast(result.msg, 'error');
+      state.pendingProfilePhoto = null;
+      render();
+      showToast('Foto de perfil atualizada!', 'success');
+      break;
+    }
+
+    case 'discard-profile-photo':
+      state.pendingProfilePhoto = null;
+      render();
+      break;
 
     case 'camera-record-toggle':
       handleRecordToggle();

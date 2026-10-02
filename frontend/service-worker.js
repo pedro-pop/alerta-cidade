@@ -1,4 +1,4 @@
-const CACHE_NAME = 'alertacidade-v1';
+const CACHE_NAME = 'alertacidade-v2';
 
 const STATIC_ASSETS = [
   './',
