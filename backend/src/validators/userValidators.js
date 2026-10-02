@@ -9,7 +9,7 @@ const createUserSchema = z.object({
   body: z.object({
     name: z.string().trim().min(2).max(120),
     email: z.string().trim().email().max(160),
-    password: z.string().min(4).max(72),
+    password: z.string().min(6).max(72),
     role: z.enum(ADMIN_CREATABLE_ROLES, {
       errorMap: () => ({ message: `Função deve ser uma de: ${ADMIN_CREATABLE_ROLES.join(', ')}.` }),
     }).transform(role => role.toLowerCase()),
@@ -23,7 +23,7 @@ const updateUserRoleSchema = z.object({
 
 const resetPasswordSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
-  body: z.object({ password: z.string().min(4).max(72) }),
+  body: z.object({ password: z.string().min(6).max(72) }),
 });
 
 const listUsersQuerySchema = z.object({

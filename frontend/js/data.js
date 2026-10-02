@@ -191,6 +191,13 @@ async function refreshUsers() {
   return usersCache;
 }
 
+async function refreshAuthenticatedData() {
+  if (!signedInUser) return;
+  const tasks = [refreshDenuncias(), refreshNotifications()];
+  if (signedInUser.role === 'superadmin') tasks.push(refreshUsers());
+  await Promise.all(tasks);
+}
+
 async function initializeData() {
   if (!getAccessToken()) return false;
   try {
@@ -243,21 +250,17 @@ async function registerCitizen({ name, email, password }) {
   name = (name || '').trim();
   email = (email || '').trim().toLowerCase();
   if (!name || !email || !password) return validationError('Preencha todos os campos.');
-  if (password.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
+  if (password.length < 6) return validationError('A senha deve ter ao menos 6 caracteres.');
   try {
     const result = await apiRegister({ name, email, password });
+    if (!result.token) {
+      signedInUser = null;
+      usersCache = [];
+      return { ok: true, needsLogin: true, user: normalizeUser(result.user) };
+    }
     signedInUser = normalizeUser(result.user);
     usersCache = [signedInUser];
-    try {
-      await Promise.all([refreshDenuncias(), refreshNotifications()]);
-      return { ok: true, user: signedInUser };
-    } catch (error) {
-      return {
-        ok: true,
-        user: signedInUser,
-        warning: 'Conta criada, mas não foi possível carregar todos os dados. Atualize a página para tentar novamente.',
-      };
-    }
+    return { ok: true, user: signedInUser };
   } catch (error) {
     return validationError(error.message);
   }
@@ -270,8 +273,6 @@ async function login({ email, password }) {
     const result = await apiLogin({ email, password });
     signedInUser = normalizeUser(result.user);
     usersCache = [signedInUser];
-    await Promise.all([refreshDenuncias(), refreshNotifications()]);
-    if (signedInUser.role === 'superadmin') await refreshUsers();
     return { ok: true, user: signedInUser };
   } catch (error) {
     return validationError(error.message);
@@ -292,7 +293,7 @@ async function createUserByAdmin({ name, email, password, role }) {
   email = (email || '').trim().toLowerCase();
   role = (role || 'admin').toLowerCase();
   if (!name || !email || !password) return validationError('Preencha todos os campos.');
-  if (password.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
+  if (password.length < 6) return validationError('A senha deve ter ao menos 6 caracteres.');
   if (!['admin', 'moderador', 'superadmin'].includes(role)) return validationError('Função inválida.');
   try {
     const { user } = await apiCreateUser({ name, email, password, role: toApiEnum(role) });
@@ -305,7 +306,7 @@ async function createUserByAdmin({ name, email, password, role }) {
 }
 
 async function resetUserPassword(userId, newPassword) {
-  if (!newPassword || newPassword.length < 4) return validationError('Senha deve ter ao menos 4 caracteres.');
+  if (!newPassword || newPassword.length < 6) return validationError('A senha deve ter ao menos 6 caracteres.');
   try {
     await apiResetUserPassword(userId, newPassword);
     return { ok: true };

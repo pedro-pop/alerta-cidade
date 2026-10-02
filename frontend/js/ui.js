@@ -282,7 +282,7 @@ function registerForm() {
     </label>
     <label class="field">
       <span>Senha</span>
-      <input type="password" name="password" placeholder="Mínimo 4 caracteres" required minlength="4">
+      <input type="password" name="password" placeholder="Mínimo 6 caracteres" required minlength="6">
     </label>
     <button type="submit" class="btn btn-primary btn-block">Criar conta</button>
   </form>`;
@@ -802,7 +802,7 @@ function createUserModal() {
     <form data-action="submit-create-user" class="form">
       <label class="field"><span>Nome completo</span><input type="text" name="name" required></label>
       <label class="field"><span>E-mail</span><input type="email" name="email" required></label>
-      <label class="field"><span>Senha</span><input type="password" name="password" minlength="4" required></label>
+      <label class="field"><span>Senha</span><input type="password" name="password" minlength="6" required></label>
       <label class="field">
         <span>Função</span>
         <select name="role" required>
@@ -826,7 +826,7 @@ function resetPasswordModal(userId) {
     </div>
     <p class="muted">Usuário: <b>${escapeHTML(u.name)}</b> (${escapeHTML(u.email)}). A senha atual não é exibida por segurança.</p>
     <form data-action="submit-reset-password" data-id="${u.id}" class="form">
-      <label class="field"><span>Nova senha</span><input type="password" name="password" minlength="4" required autofocus></label>
+      <label class="field"><span>Nova senha</span><input type="password" name="password" minlength="6" required autofocus></label>
       <button type="submit" class="btn btn-primary btn-block">Salvar nova senha</button>
     </form>
   `);
@@ -1423,6 +1423,16 @@ function focusSearchEnd(isAdmin) {
   }
 }
 
+function loadAuthenticatedDataInBackground(userId) {
+  refreshAuthenticatedData().then(() => {
+    if (currentUser()?.id === userId) render();
+  }).catch((error) => {
+    if (currentUser()?.id === userId) {
+      showToast(`Sessão iniciada, mas não foi possível carregar todos os dados: ${error.message}`, 'error');
+    }
+  });
+}
+
 document.addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-action]');
   if (!form) return;
@@ -1434,24 +1444,75 @@ document.addEventListener('submit', async (e) => {
 
   switch (action) {
     case 'submit-login': {
-      const res = await login(data);
-
-      if (!res.ok) return showToast(res.msg, 'error');
-
-      state.screen = 'dashboard';
-      render();
-      showToast(`Bem-vindo, ${res.user.name.split(' ')[0]}!`, 'success');
+      if (form.dataset.submitting === 'true') break;
+      const button = form.querySelector('[type="submit"]');
+      const originalLabel = button?.textContent || '';
+      form.dataset.submitting = 'true';
+      form.setAttribute('aria-busy', 'true');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Entrando...';
+      }
+      try {
+        const res = await login(data);
+        if (!res.ok) {
+          showToast(res.msg, 'error');
+          break;
+        }
+        state.screen = 'dashboard';
+        render();
+        showToast(`Bem-vindo, ${res.user.name.split(' ')[0]}!`, 'success');
+        loadAuthenticatedDataInBackground(res.user.id);
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        form.dataset.submitting = 'false';
+        form.removeAttribute('aria-busy');
+        if (button?.isConnected) {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      }
       break;
     }
 
     case 'submit-register': {
-      const res = await registerCitizen(data);
-
-      if (!res.ok) return showToast(res.msg, 'error');
-
-      state.screen = 'dashboard';
-      render();
-      showToast(res.warning || 'Conta criada com sucesso!', res.warning ? 'error' : 'success');
+      if (form.dataset.submitting === 'true') break;
+      const button = form.querySelector('[type="submit"]');
+      const originalLabel = button?.textContent || '';
+      form.dataset.submitting = 'true';
+      form.setAttribute('aria-busy', 'true');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Criando conta...';
+      }
+      try {
+        const res = await registerCitizen(data);
+        if (!res.ok) {
+          showToast(res.msg, 'error');
+          break;
+        }
+        if (res.needsLogin) {
+          state.screen = 'auth';
+          state.authMode = 'login';
+          render();
+          showToast('Conta criada. Entre com seu e-mail e senha.', 'success');
+          break;
+        }
+        state.screen = 'dashboard';
+        render();
+        showToast('Conta criada com sucesso!', 'success');
+        loadAuthenticatedDataInBackground(res.user.id);
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        form.dataset.submitting = 'false';
+        form.removeAttribute('aria-busy');
+        if (button?.isConnected) {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      }
       break;
     }
 
