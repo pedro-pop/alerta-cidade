@@ -4,7 +4,11 @@ const path = require('path');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const env = require('../config/env');
-const { publicUrlFor } = require('../middlewares/upload');
+const {
+  publicUrlFor,
+  uploadFileToStorage,
+  removeStorageObject,
+} = require('../middlewares/upload');
 const { getVideoDurationSeconds } = require('../utils/videoDuration');
 const { notifyUnlessSelf } = require('../services/notificationService');
 
@@ -278,13 +282,16 @@ async function create(req, res) {
   } = req.validated.body;
 
   const normalizedCategory = category.toLowerCase();
+  let mediaObjectPath;
+  let full;
 
   try {
     const mediaData = req.file
       ? await prepareMedia(req.file)
       : null;
+    mediaObjectPath = mediaData?.storageObjectPath;
 
-    const full = await prisma.$transaction(async (transaction) => {
+    full = await prisma.$transaction(async (transaction) => {
       const denuncia = await transaction.denuncia.create({
         data: {
           title,
@@ -303,6 +310,7 @@ async function create(req, res) {
       });
 
       if (mediaData) {
+        delete mediaData.storageObjectPath;
         await transaction.denuncia_media.create({
           data: {
             ...mediaData,
@@ -318,17 +326,16 @@ async function create(req, res) {
         select: denunciaListSelect,
       });
     });
-
-    res.status(201).json({
-      denuncia: serializeDenuncia(full, false),
-    });
   } catch (error) {
-    if (req.file) {
-      await fs.promises.unlink(req.file.path).catch(() => {});
-    }
-
+    if (mediaObjectPath) await removeStorageObject(mediaObjectPath).catch(() => {});
     throw error;
+  } finally {
+    if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
   }
+
+  res.status(201).json({
+    denuncia: serializeDenuncia(full, false),
+  });
 }
 
 async function prepareMedia(file) {
@@ -394,11 +401,17 @@ async function prepareMedia(file) {
 
   file.path = safePath;
 
+  const uploaded = await uploadFileToStorage(
+    file,
+    'denuncias',
+    detectedType.ext,
+    detectedType.mime
+  );
+
   return {
     media_type: isVideo ? 'video' : 'image',
-    
-    storage_path: file.path,
-    
+    storage_path: uploaded.publicUrl,
+    storageObjectPath: uploaded.objectPath,
   };
 }
 

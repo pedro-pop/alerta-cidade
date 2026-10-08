@@ -1,7 +1,9 @@
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const sanitizeUser = require('../utils/sanitizeUser');
-const { publicUrlFor } = require('../middlewares/upload');
+const { uploadFileToStorage, removeStorageObject } = require('../middlewares/upload');
 const { getSupabaseAdmin } = require('../config/supabaseAdmin');
 
 // GET /api/users — apenas SUPERADMIN. Suporta ?role= e ?search= (nome ou id).
@@ -104,10 +106,35 @@ async function resetPassword(req, res) {
 async function updateMyPhoto(req, res) {
   if (!req.file) throw ApiError.badRequest('Envie um arquivo de imagem no campo "photo".');
 
-  const photoUrl = publicUrlFor(req.file);
-  const user = await prisma.user.update({ where: { id: req.user.id }, data: { photo_url: photoUrl } });
+  let objectPath;
+  let profileUpdated = false;
 
-  res.json({ user: sanitizeUser(user, req.user.email) });
+  try {
+    const extension = path.extname(req.file.filename).slice(1).toLowerCase()
+      || req.file.mimetype.split('/')[1]?.split('+')[0];
+    const uploaded = await uploadFileToStorage(
+      req.file,
+      'avatars',
+      extension,
+      req.file.mimetype
+    );
+    objectPath = uploaded.objectPath;
+
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { photo_url: uploaded.publicUrl },
+    });
+    profileUpdated = true;
+
+    res.json({ user: sanitizeUser(user, req.user.email) });
+  } catch (error) {
+    if (objectPath && !profileUpdated) {
+      await removeStorageObject(objectPath).catch(() => {});
+    }
+    throw error;
+  } finally {
+    await fs.promises.unlink(req.file.path).catch(() => {});
+  }
 }
 
 module.exports = { listUsers, createUser, updateUserRole, resetPassword, updateMyPhoto };

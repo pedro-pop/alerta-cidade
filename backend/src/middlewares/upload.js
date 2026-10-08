@@ -12,10 +12,12 @@ const crypto = require('crypto');
 const multer = require('multer');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
+const { getSupabaseAdmin } = require('../config/supabaseAdmin');
 
 const UPLOAD_ROOT = path.resolve(
   process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads')
 );
+const STORAGE_BUCKET = 'media';
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -68,4 +70,64 @@ function publicUrlFor(file) {
   return `/uploads/${relative}`;
 }
 
-module.exports = { avatarUpload, denunciaMediaUpload, publicUrlFor, UPLOAD_ROOT };
+async function uploadFileToStorage(file, folder, extension, contentType) {
+  const safeExtension = String(extension || '')
+    .replace(/^\./, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase();
+  if (!safeExtension || !contentType) {
+    throw ApiError.badRequest('Não foi possível identificar o formato do arquivo.');
+  }
+
+  const objectPath = `${folder}/${crypto.randomUUID()}.${safeExtension}`;
+  const storage = getSupabaseAdmin().storage.from(STORAGE_BUCKET);
+  const buffer = await fs.promises.readFile(file.path);
+
+  let uploadResult;
+  try {
+    uploadResult = await storage.upload(objectPath, buffer, {
+      contentType,
+      upsert: false,
+    });
+  } catch {
+    await storage.remove([objectPath]).catch(() => {});
+    throw new ApiError(502, 'Não foi possível enviar o arquivo ao Supabase Storage.');
+  }
+
+  if (uploadResult.error) {
+    await storage.remove([objectPath]).catch(() => {});
+    throw new ApiError(502, 'Não foi possível enviar o arquivo ao Supabase Storage.');
+  }
+
+  let publicUrl;
+  try {
+    publicUrl = storage.getPublicUrl(objectPath).data?.publicUrl;
+  } catch {
+    await storage.remove([objectPath]).catch(() => {});
+    throw new ApiError(502, 'Não foi possível gerar a URL pública do arquivo.');
+  }
+  if (!publicUrl) {
+    await storage.remove([objectPath]).catch(() => {});
+    throw new ApiError(502, 'Não foi possível gerar a URL pública do arquivo.');
+  }
+
+  return { objectPath, publicUrl };
+}
+
+async function removeStorageObject(objectPath) {
+  if (!objectPath) return;
+  const { error } = await getSupabaseAdmin()
+    .storage
+    .from(STORAGE_BUCKET)
+    .remove([objectPath]);
+  if (error) throw new ApiError(502, 'Não foi possível remover o arquivo do Supabase Storage.');
+}
+
+module.exports = {
+  avatarUpload,
+  denunciaMediaUpload,
+  publicUrlFor,
+  uploadFileToStorage,
+  removeStorageObject,
+  UPLOAD_ROOT,
+};
