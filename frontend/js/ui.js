@@ -21,6 +21,7 @@ const state = {
   cameraAllowVideo: false,
   cameraMode: 'photo',
   cameraFacingMode: 'user',
+  cameraFullscreen: false,
   cameraSwitching: false,
   cameraRecording: false,
   cameraOnDone: null,
@@ -859,6 +860,7 @@ function openCameraCapture({ allowVideo, title, onDone }) {
   state.cameraAllowVideo = !!allowVideo;
   state.cameraMode = 'photo';
   state.cameraFacingMode = 'user';
+  state.cameraFullscreen = false;
   state.cameraSwitching = true;
   state.cameraRecording = false;
   state.cameraOnDone = onDone;
@@ -883,9 +885,12 @@ function cameraModalHTML(title) {
   return `
   <div class="modal-overlay" data-action="camera-cancel">
     <div class="modal modal-camera" data-stop>
-      <div class="modal-head">
+      <div class="modal-head camera-modal-head">
         <h2>${escapeHTML(title || 'Usar câmera')}</h2>
-        <button class="icon-btn" data-action="camera-cancel">${ICONS.close}</button>
+        <div class="camera-modal-head-actions">
+          <button type="button" class="btn btn-outline btn-sm" data-action="camera-fullscreen">⛶ Tela cheia</button>
+          <button type="button" class="icon-btn" data-action="camera-cancel" title="Fechar câmera">${ICONS.close}</button>
+        </div>
       </div>
       <div class="camera-preview-wrap">
         <video id="camera-preview" class="${state.cameraFacingMode === 'user' ? 'front-camera' : ''}" autoplay playsinline muted></video>
@@ -922,6 +927,37 @@ function updateCameraModeUI() {
   const actions = document.getElementById('camera-actions');
   if (actions) actions.innerHTML = cameraActionButtonsHTML();
 }
+
+async function toggleCameraFullscreen() {
+  const modal = document.querySelector('.modal-camera');
+  const overlay = modal?.closest('.modal-overlay');
+  if (!modal || !overlay) return;
+
+  state.cameraFullscreen = !state.cameraFullscreen;
+  overlay.classList.toggle('camera-overlay-fullscreen', state.cameraFullscreen);
+  modal.classList.toggle('camera-modal-fullscreen', state.cameraFullscreen);
+  const button = modal.querySelector('[data-action="camera-fullscreen"]');
+  if (button) button.textContent = state.cameraFullscreen ? 'Sair da tela cheia' : '⛶ Tela cheia';
+
+  if (state.cameraFullscreen && modal.requestFullscreen) {
+    try {
+      await modal.requestFullscreen();
+    } catch {
+      // A classe CSS mantém o modo expandido quando o navegador bloqueia a API.
+    }
+  } else if (!state.cameraFullscreen && document.fullscreenElement === modal) {
+    await document.exitFullscreen().catch(() => {});
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement || !state.cameraFullscreen) return;
+  state.cameraFullscreen = false;
+  document.querySelector('.camera-overlay-fullscreen')?.classList.remove('camera-overlay-fullscreen');
+  document.querySelector('.camera-modal-fullscreen')?.classList.remove('camera-modal-fullscreen');
+  const button = document.querySelector('[data-action="camera-fullscreen"]');
+  if (button) button.textContent = '⛶ Tela cheia';
+});
 
 async function switchCamera() {
   if (state.cameraSwitching || state.cameraRecording) return;
@@ -1090,6 +1126,9 @@ document.addEventListener('click', async (e) => {
     if (!clickedInsideModal || clickedCloseButton) {
       Camera.stop();
       state.cameraOnDone = null;
+      state.cameraFullscreen = false;
+      const cameraModal = document.querySelector('.modal-camera');
+      if (document.fullscreenElement === cameraModal) document.exitFullscreen().catch(() => {});
       closeModal();
       if (outsideNotifClick) render();
       return;
@@ -1301,6 +1340,10 @@ document.addEventListener('click', async (e) => {
 
     case 'camera-switch':
       await switchCamera();
+      break;
+
+    case 'camera-fullscreen':
+      await toggleCameraFullscreen();
       break;
 
     case 'camera-capture-photo': {
